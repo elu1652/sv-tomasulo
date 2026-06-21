@@ -10,7 +10,6 @@ module regfile #(
     input  logic [ADDR_W-1:0] raddr2,
     output logic [WIDTH-1:0]  rdata1,
     output logic [WIDTH-1:0]  rdata2,
-    
     input logic              we,
     input logic [ADDR_W-1:0] waddr,
     input logic [WIDTH-1:0]  wdata
