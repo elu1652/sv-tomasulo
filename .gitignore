@@ -1,0 +1,17 @@
+# Verilator build output
+obj_dir/
+
+# Simulation output
+*.vcd
+*.fst
+*.vvp
+
+# Logs
+*.log
+
+# Editor files
+.vscode/
+*.swp
+
+# OS files
+.DS_Store
