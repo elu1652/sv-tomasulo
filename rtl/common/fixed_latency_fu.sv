@@ -68,7 +68,7 @@ module fixed_latency_fu #(
                 a_reg <= a;
                 b_reg <= b;
                 tag_reg <= tag_in;
-                cycles_left <= LATENCY;
+                cycles_left <= COUNT_W'(LATENCY);
             end else if (busy) begin
                 if (cycles_left == 1) begin
                     busy <= 1'b0;
