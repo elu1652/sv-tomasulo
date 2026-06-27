@@ -4,12 +4,12 @@ SIM_FLAGS  := --binary --trace --timing -Wall -Wno-fatal
 LINT_FLAGS := --lint-only --timing -Wall -Wno-fatal
 
 .PHONY: \
-	sim sim_alu sim_regfile sim_fu sim_fifo \
-	wave_alu wave_regfile wave_fu wave_fifo \
-	lint lint_alu lint_regfile lint_fu lint_fifo \
+	sim sim_alu sim_regfile sim_fu sim_fifo sim_rob\
+	wave_alu wave_regfile wave_fu wave_fifo wave_rob \
+	lint lint_alu lint_regfile lint_fu lint_fifo lint_rob \
 	clean
 
-sim: sim_alu sim_regfile sim_fu sim_fifo
+sim: sim_alu sim_regfile sim_fu sim_fifo sim_rob
 	@echo
 	@echo "================================"
 	@echo "ALL TESTS PASSED"
@@ -83,6 +83,23 @@ sim_fifo:
 	@echo "[TEST]  FIFO"
 	@./obj_dir/fifo/Vfifo_tb
 
+sim_rob:
+	@echo
+	@echo "[BUILD] ROB"
+	@mkdir -p obj_dir/rob
+	@$(VERILATOR) $(SIM_FLAGS) \
+		--Mdir obj_dir/rob \
+		--top-module rob_tb \
+		rtl/core/rob.sv \
+		tb/core/rob_tb.sv \
+		> obj_dir/rob/build.log 2>&1 || { \
+			echo "[ERROR] ROB build failed"; \
+			cat obj_dir/rob/build.log; \
+			exit 1; \
+		}
+	@echo "[TEST]  ROB"
+	@./obj_dir/rob/Vrob_tb
+
 wave_alu:
 	@gtkwave alu_tb.vcd
 
@@ -95,7 +112,10 @@ wave_fu:
 wave_fifo:
 	@gtkwave fifo_tb.vcd
 
-lint: lint_alu lint_regfile lint_fu lint_fifo
+wave_rob:
+	@gtkwave rob_tb.vcd
+
+lint: lint_alu lint_regfile lint_fu lint_fifo lint_rob
 	@echo
 	@echo "ALL LINT CHECKS PASSED"
 
@@ -144,6 +164,18 @@ lint_fifo:
 		tb/common/fifo_tb.sv \
 		> obj_dir/fifo/lint.log 2>&1 || { \
 			cat obj_dir/fifo/lint.log; \
+			exit 1; \
+		}
+
+lint_rob:
+	@echo "[LINT]  ROB"
+	@mkdir -p obj_dir/rob
+	@$(VERILATOR) $(LINT_FLAGS) \
+		--top-module rob_tb \
+		rtl/core/rob.sv \
+		tb/core/rob_tb.sv \
+		> obj_dir/rob/lint.log 2>&1 || { \
+			cat obj_dir/rob/lint.log; \
 			exit 1; \
 		}
 

@@ -8,139 +8,112 @@ The goal is to build the design step by step, starting from simple reusable RTL 
 
 Implemented and tested:
 
-- Combinational ALU
-- Parameterized register file
-- Fixed-latency functional unit
-- FIFO / circular queue
-- Self-checking SystemVerilog testbenches
-- Verilator simulation workflow
-- GTKWave waveform generation
-
-## Project Structure
-
-```text
-sv-tomasulo/
-├── rtl/
-│   └── common/
-│       ├── alu.sv
-│       ├── regfile.sv
-│       ├── fixed_latency_fu.sv
-│       └── fifo.sv
-├── tb/
-│   └── common/
-│       ├── alu_tb.sv
-│       ├── regfile_tb.sv
-│       ├── fixed_latency_fu_tb.sv
-│       └── fifo_tb.sv
-├── docs/
-├── scripts/
-├── sim/
-├── Makefile
-└── README.md
-```
-
-## Tools
-
-This project currently uses:
-
-- SystemVerilog
-- Verilator
-- GTKWave
-- GNU Make
-
-## Running Tests
-
-Run all tests:
-
-```bash
-make sim
-```
-
-Run individual tests:
-
-```bash
-make sim_alu
-make sim_regfile
-make sim_fu
-make sim_fifo
-```
-
-Run lint checks:
-
-```bash
-make lint
-```
-
-Clean build and waveform files:
-
-```bash
-make clean
-```
-
-## Viewing Waveforms
-
-After running a simulation, open the waveform with:
-
-```bash
-make wave_alu
-make wave_regfile
-make wave_fu
-make wave_fifo
-```
+* Combinational ALU
+* Parameterized register file
+* Fixed-latency functional unit
+* FIFO / circular queue
+* Reorder Buffer skeleton
+* Self-checking SystemVerilog testbenches
+* Verilator simulation workflow
+* GTKWave waveform generation
 
 ## Implemented Modules
 
 ### ALU
 
-A combinational arithmetic/logic unit supporting basic integer operations such as add, subtract, bitwise logic, and set-less-than.
+A combinational arithmetic/logic unit supporting basic operations such as add, subtract, bitwise logic, and signed set-less-than.
 
 ### Register File
 
-A parameterized register file with:
-
-- two combinational read ports
-- one synchronous write port
-- active-low reset
-- hardwired zero register
+A small parameterized architectural register file with two combinational read ports, one synchronous write port, reset behavior, and R0 hardwired to zero.
 
 ### Fixed-Latency Functional Unit
 
-A clocked functional unit wrapper that:
+A simple multi-cycle functional unit that accepts an operation, operands, and an input tag, then produces a result and matching output tag after a fixed latency.
 
-- accepts an operation when idle
-- stores operands and a destination tag
-- remains busy for a fixed number of cycles
-- outputs a result and tag with `result_valid`
-
-This will later connect to reservation stations and the common data bus.
+This models the future execution unit behavior used in a Tomasulo-style backend.
 
 ### FIFO / Circular Queue
 
-A parameterized circular queue with:
+A parameterized ready/valid FIFO using head and tail pointers, occupancy count, full/empty detection, and wraparound behavior.
 
-- ready/valid push interface
-- ready/valid pop interface
-- head and tail pointers
-- occupancy count
-- full and empty behavior
+This module helped establish the circular-buffer logic later reused by the ROB.
 
-This is preparation for the future reorder buffer.
+### Reorder Buffer Skeleton
+
+A simple reorder buffer that supports:
+
+* In-order allocation at the tail
+* ROB tag generation
+* Out-of-order writeback by tag
+* In-order commit from the head
+* Ready/valid tracking per entry
+* Destination register and result value storage
+* Full/empty tracking through an occupancy count
+* Circular head/tail wraparound
+
+The ROB demonstrates a core out-of-order execution idea: instructions may finish out of order, but they commit in program order.
+
+Example tested behavior:
+
+* Allocate ROB0, ROB1, ROB2
+* Write back ROB1 before ROB0
+* Confirm ROB1 cannot commit yet
+* Write back ROB0
+* Commit ROB0 first
+* Commit ROB1 next
+
+This proves that the design allows out-of-order completion while preserving in-order architectural state updates.
+
+## Build and Run
+
+Run all simulations:
+
+```bash
+make sim
+```
+
+Run only the ROB test:
+
+```bash
+make sim_rob
+```
+
+Open the ROB waveform:
+
+```bash
+make wave_rob
+```
+
+Clean generated files:
+
+```bash
+make clean
+```
+
+## Tools
+
+* SystemVerilog
+* Verilator
+* GTKWave
+* Make
+* Linux development environment
 
 ## Planned Next Steps
 
-Near-term modules:
+Near-term:
 
-1. ROB skeleton / circular commit queue
-2. Reservation station
-3. CDB arbiter
-4. Rename table
-5. Tiny Tomasulo backend integration
+1. Add a reservation station module.
+2. Connect reservation station dispatch to the fixed-latency functional unit.
+3. Add a simple CDB-style writeback path.
+4. Connect FU writeback into the ROB.
+5. Add a small rename table.
 
-Longer-term features:
+Longer-term:
 
-- in-order commit
-- load/store queue
-- memory ordering
-- branch handling
-- direct-mapped L1 data cache
-- trace/debug infrastructure
+1. Build a tiny integrated Tomasulo backend.
+2. Support register renaming and operand wakeup.
+3. Add in-order commit to the architectural register file.
+4. Add load/store queue behavior.
+5. Add branch recovery.
+6. Add a simple cache/memory model.
