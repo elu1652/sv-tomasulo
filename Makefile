@@ -4,12 +4,12 @@ SIM_FLAGS  := --binary --trace --timing -Wall -Wno-fatal
 LINT_FLAGS := --lint-only --timing -Wall -Wno-fatal
 
 .PHONY: \
-	sim sim_alu sim_regfile sim_fu \
-	wave_alu wave_regfile wave_fu \
-	lint lint_alu lint_regfile lint_fu \
+	sim sim_alu sim_regfile sim_fu sim_fifo \
+	wave_alu wave_regfile wave_fu wave_fifo \
+	lint lint_alu lint_regfile lint_fu lint_fifo \
 	clean
 
-sim: sim_alu sim_regfile sim_fu
+sim: sim_alu sim_regfile sim_fu sim_fifo
 	@echo
 	@echo "================================"
 	@echo "ALL TESTS PASSED"
@@ -66,6 +66,23 @@ sim_fu:
 	@echo "[TEST]  Fixed-latency FU"
 	@./obj_dir/fu/Vfixed_latency_fu_tb
 
+sim_fifo:
+	@echo
+	@echo "[BUILD] FIFO"
+	@mkdir -p obj_dir/fifo
+	@$(VERILATOR) $(SIM_FLAGS) \
+		--Mdir obj_dir/fifo \
+		--top-module fifo_tb \
+		rtl/common/fifo.sv \
+		tb/common/fifo_tb.sv \
+		> obj_dir/fifo/build.log 2>&1 || { \
+			echo "[ERROR] FIFO build failed"; \
+			cat obj_dir/fifo/build.log; \
+			exit 1; \
+		}
+	@echo "[TEST]  FIFO"
+	@./obj_dir/fifo/Vfifo_tb
+
 wave_alu:
 	@gtkwave alu_tb.vcd
 
@@ -75,7 +92,10 @@ wave_regfile:
 wave_fu:
 	@gtkwave fixed_latency_fu_tb.vcd
 
-lint: lint_alu lint_regfile lint_fu
+wave_fifo:
+	@gtkwave fifo_tb.vcd
+
+lint: lint_alu lint_regfile lint_fu lint_fifo
 	@echo
 	@echo "ALL LINT CHECKS PASSED"
 
@@ -112,6 +132,18 @@ lint_fu:
 		tb/common/fixed_latency_fu_tb.sv \
 		> obj_dir/fu/lint.log 2>&1 || { \
 			cat obj_dir/fu/lint.log; \
+			exit 1; \
+		}
+
+lint_fifo:
+	@echo "[LINT]  FIFO"
+	@mkdir -p obj_dir/fifo
+	@$(VERILATOR) $(LINT_FLAGS) \
+		--top-module fifo_tb \
+		rtl/common/fifo.sv \
+		tb/common/fifo_tb.sv \
+		> obj_dir/fifo/lint.log 2>&1 || { \
+			cat obj_dir/fifo/lint.log; \
 			exit 1; \
 		}
 
