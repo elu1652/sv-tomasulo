@@ -4,12 +4,12 @@ SIM_FLAGS  := --binary --trace --timing -Wall -Wno-fatal
 LINT_FLAGS := --lint-only --timing -Wall -Wno-fatal
 
 .PHONY: \
-	sim sim_alu sim_regfile sim_fu sim_fifo sim_rob\
-	wave_alu wave_regfile wave_fu wave_fifo wave_rob \
-	lint lint_alu lint_regfile lint_fu lint_fifo lint_rob \
+	sim sim_alu sim_regfile sim_fu sim_fifo sim_rob sim_rs \
+	wave_alu wave_regfile wave_fu wave_fifo wave_rob wave_rs \
+	lint lint_alu lint_regfile lint_fu lint_fifo lint_rob lint_rs \
 	clean
 
-sim: sim_alu sim_regfile sim_fu sim_fifo sim_rob
+sim: sim_alu sim_regfile sim_fu sim_fifo sim_rob sim_rs
 	@echo
 	@echo "================================"
 	@echo "ALL TESTS PASSED"
@@ -100,6 +100,23 @@ sim_rob:
 	@echo "[TEST]  ROB"
 	@./obj_dir/rob/Vrob_tb
 
+sim_rs:
+	@echo
+	@echo "[BUILD] Reservation station"
+	@mkdir -p obj_dir/rs
+	@$(VERILATOR) $(SIM_FLAGS) \
+		--Mdir obj_dir/rs \
+		--top-module reservation_station_tb \
+		rtl/core/reservation_station.sv \
+		tb/core/reservation_station_tb.sv \
+		> obj_dir/rs/build.log 2>&1 || { \
+			echo "[ERROR] Reservation station build failed"; \
+			cat obj_dir/rs/build.log; \
+			exit 1; \
+		}
+	@echo "[TEST]  Reservation station"
+	@./obj_dir/rs/Vreservation_station_tb
+
 wave_alu:
 	@gtkwave alu_tb.vcd
 
@@ -115,7 +132,10 @@ wave_fifo:
 wave_rob:
 	@gtkwave rob_tb.vcd
 
-lint: lint_alu lint_regfile lint_fu lint_fifo lint_rob
+wave_rs:
+	@gtkwave reservation_station_tb.vcd
+
+lint: lint_alu lint_regfile lint_fu lint_fifo lint_rob lint_rs
 	@echo
 	@echo "ALL LINT CHECKS PASSED"
 
@@ -176,6 +196,18 @@ lint_rob:
 		tb/core/rob_tb.sv \
 		> obj_dir/rob/lint.log 2>&1 || { \
 			cat obj_dir/rob/lint.log; \
+			exit 1; \
+		}
+
+lint_rs:
+	@echo "[LINT]  Reservation station"
+	@mkdir -p obj_dir/rs
+	@$(VERILATOR) $(LINT_FLAGS) \
+		--top-module reservation_station_tb \
+		rtl/core/reservation_station.sv \
+		tb/core/reservation_station_tb.sv \
+		> obj_dir/rs/lint.log 2>&1 || { \
+			cat obj_dir/rs/lint.log; \
 			exit 1; \
 		}
 
