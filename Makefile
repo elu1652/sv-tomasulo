@@ -4,12 +4,12 @@ SIM_FLAGS  := --binary --trace --timing -Wall -Wno-fatal
 LINT_FLAGS := --lint-only --timing -Wall -Wno-fatal
 
 .PHONY: \
-	sim sim_alu sim_regfile sim_fu sim_fifo sim_rob sim_rs \
-	wave_alu wave_regfile wave_fu wave_fifo wave_rob wave_rs \
-	lint lint_alu lint_regfile lint_fu lint_fifo lint_rob lint_rs \
+	sim sim_alu sim_regfile sim_fu sim_fifo sim_rob sim_rs sim_cdb\
+	wave_alu wave_regfile wave_fu wave_fifo wave_rob wave_rs wave_cdb \
+	lint lint_alu lint_regfile lint_fu lint_fifo lint_rob lint_rs lint_cdb \
 	clean
 
-sim: sim_alu sim_regfile sim_fu sim_fifo sim_rob sim_rs
+sim: sim_alu sim_regfile sim_fu sim_fifo sim_rob sim_rs sim_cdb
 	@echo
 	@echo "================================"
 	@echo "ALL TESTS PASSED"
@@ -117,6 +117,23 @@ sim_rs:
 	@echo "[TEST]  Reservation station"
 	@./obj_dir/rs/Vreservation_station_tb
 
+sim_cdb:
+	@echo
+	@echo "[BUILD] CDB"
+	@mkdir -p obj_dir/cdb
+	@$(VERILATOR) $(SIM_FLAGS) \
+		--Mdir obj_dir/cdb \
+		--top-module cdb_tb \
+		rtl/core/cdb.sv \
+		tb/core/cdb_tb.sv \
+		> obj_dir/cdb/build.log 2>&1 || { \
+			echo "[ERROR] CDB build failed"; \
+			cat obj_dir/cdb/build.log; \
+			exit 1; \
+		}
+	@echo "[TEST]  CDB"
+	@./obj_dir/cdb/Vcdb_tb
+
 wave_alu:
 	@gtkwave alu_tb.vcd
 
@@ -135,7 +152,10 @@ wave_rob:
 wave_rs:
 	@gtkwave reservation_station_tb.vcd
 
-lint: lint_alu lint_regfile lint_fu lint_fifo lint_rob lint_rs
+wave_cdb:
+	@gtkwave cdb_tb.vcd
+
+lint: lint_alu lint_regfile lint_fu lint_fifo lint_rob lint_rs lint_cdb
 	@echo
 	@echo "ALL LINT CHECKS PASSED"
 
@@ -208,6 +228,18 @@ lint_rs:
 		tb/core/reservation_station_tb.sv \
 		> obj_dir/rs/lint.log 2>&1 || { \
 			cat obj_dir/rs/lint.log; \
+			exit 1; \
+		}
+
+lint_cdb:
+	@echo "[LINT]  CDB"
+	@mkdir -p obj_dir/cdb
+	@$(VERILATOR) $(LINT_FLAGS) \
+		--top-module cdb_tb \
+		rtl/core/cdb.sv \
+		tb/core/cdb_tb.sv \
+		> obj_dir/cdb/lint.log 2>&1 || { \
+			cat obj_dir/cdb/lint.log; \
 			exit 1; \
 		}
 
