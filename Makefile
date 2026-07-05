@@ -3,136 +3,157 @@ VERILATOR := verilator
 SIM_FLAGS  := --binary --trace --timing -Wall -Wno-fatal
 LINT_FLAGS := --lint-only --timing -Wall -Wno-fatal
 
-.PHONY: \
-	sim sim_alu sim_regfile sim_fu sim_fifo sim_rob sim_rs sim_cdb\
-	wave_alu wave_regfile wave_fu wave_fifo wave_rob wave_rs wave_cdb \
-	lint lint_alu lint_regfile lint_fu lint_fifo lint_rob lint_rs lint_cdb \
-	clean
+# --------------------------------------------------------------------
+# Test source lists
+# --------------------------------------------------------------------
 
-sim: sim_alu sim_regfile sim_fu sim_fifo sim_rob sim_rs sim_cdb
+ALU_SRCS := \
+	rtl/common/alu.sv \
+	tb/common/alu_tb.sv
+
+REGFILE_SRCS := \
+	rtl/common/regfile.sv \
+	tb/common/regfile_tb.sv
+
+FU_SRCS := \
+	rtl/common/fixed_latency_fu.sv \
+	tb/common/fixed_latency_fu_tb.sv
+
+FIFO_SRCS := \
+	rtl/common/fifo.sv \
+	tb/common/fifo_tb.sv
+
+ROB_SRCS := \
+	rtl/core/rob.sv \
+	tb/core/rob_tb.sv
+
+RS_SRCS := \
+	rtl/core/reservation_station.sv \
+	tb/core/reservation_station_tb.sv
+
+CDB_SRCS := \
+	rtl/core/cdb.sv \
+	tb/core/cdb_tb.sv
+
+BACKEND_WRITEBACK_SRCS := \
+	rtl/core/rob.sv \
+	rtl/core/reservation_station.sv \
+	rtl/common/fixed_latency_fu.sv \
+	rtl/core/cdb.sv \
+	tb/core/backend_writeback_tb.sv
+
+BACKEND_DEPENDENCY_SRCS := \
+	rtl/core/rob.sv \
+	rtl/core/reservation_station.sv \
+	rtl/common/fixed_latency_fu.sv \
+	rtl/core/cdb.sv \
+	tb/core/backend_dependency_tb.sv
+
+
+# --------------------------------------------------------------------
+# Test list
+# Format: name:top_module
+# --------------------------------------------------------------------
+
+TESTS := \
+	alu:alu_tb \
+	regfile:regfile_tb \
+	fu:fixed_latency_fu_tb \
+	fifo:fifo_tb \
+	rob:rob_tb \
+	rs:reservation_station_tb \
+	cdb:cdb_tb \
+	backend_writeback:backend_writeback_tb \
+	backend_dependency:backend_dependency_tb
+
+
+# --------------------------------------------------------------------
+# Helper macros
+# --------------------------------------------------------------------
+
+define SIM_TEMPLATE
+sim_$(1):
+	@echo
+	@echo "[BUILD] $(1)"
+	@mkdir -p obj_dir/$(1)
+	@$$(VERILATOR) $$(SIM_FLAGS) \
+		--Mdir obj_dir/$(1) \
+		--top-module $(2) \
+		$$($(3)_SRCS) \
+		> obj_dir/$(1)/build.log 2>&1 || { \
+			echo "[ERROR] $(1) build failed"; \
+			cat obj_dir/$(1)/build.log; \
+			exit 1; \
+		}
+	@echo "[TEST]  $(1)"
+	@./obj_dir/$(1)/V$(2)
+endef
+
+define LINT_TEMPLATE
+lint_$(1):
+	@echo "[LINT]  $(1)"
+	@mkdir -p obj_dir/$(1)
+	@$$(VERILATOR) $$(LINT_FLAGS) \
+		--top-module $(2) \
+		$$($(3)_SRCS) \
+		> obj_dir/$(1)/lint.log 2>&1 || { \
+			cat obj_dir/$(1)/lint.log; \
+			exit 1; \
+		}
+endef
+
+
+# --------------------------------------------------------------------
+# Generate sim/lint targets
+# --------------------------------------------------------------------
+
+$(eval $(call SIM_TEMPLATE,alu,alu_tb,ALU))
+$(eval $(call SIM_TEMPLATE,regfile,regfile_tb,REGFILE))
+$(eval $(call SIM_TEMPLATE,fu,fixed_latency_fu_tb,FU))
+$(eval $(call SIM_TEMPLATE,fifo,fifo_tb,FIFO))
+$(eval $(call SIM_TEMPLATE,rob,rob_tb,ROB))
+$(eval $(call SIM_TEMPLATE,rs,reservation_station_tb,RS))
+$(eval $(call SIM_TEMPLATE,cdb,cdb_tb,CDB))
+$(eval $(call SIM_TEMPLATE,backend_writeback,backend_writeback_tb,BACKEND_WRITEBACK))
+$(eval $(call SIM_TEMPLATE,backend_dependency,backend_dependency_tb,BACKEND_DEPENDENCY))
+
+$(eval $(call LINT_TEMPLATE,alu,alu_tb,ALU))
+$(eval $(call LINT_TEMPLATE,regfile,regfile_tb,REGFILE))
+$(eval $(call LINT_TEMPLATE,fu,fixed_latency_fu_tb,FU))
+$(eval $(call LINT_TEMPLATE,fifo,fifo_tb,FIFO))
+$(eval $(call LINT_TEMPLATE,rob,rob_tb,ROB))
+$(eval $(call LINT_TEMPLATE,rs,reservation_station_tb,RS))
+$(eval $(call LINT_TEMPLATE,cdb,cdb_tb,CDB))
+$(eval $(call LINT_TEMPLATE,backend_writeback,backend_writeback_tb,BACKEND_WRITEBACK))
+$(eval $(call LINT_TEMPLATE,backend_dependency,backend_dependency_tb,BACKEND_DEPENDENCY))
+
+
+# --------------------------------------------------------------------
+# Aggregate targets
+# --------------------------------------------------------------------
+
+.PHONY: sim lint clean \
+	sim_alu sim_regfile sim_fu sim_fifo sim_rob sim_rs sim_cdb \
+	sim_backend_writeback sim_backend_dependency \
+	lint_alu lint_regfile lint_fu lint_fifo lint_rob lint_rs lint_cdb \
+	lint_backend_writeback lint_backend_dependency \
+	wave_alu wave_regfile wave_fu wave_fifo wave_rob wave_rs wave_cdb \
+	wave_backend_writeback wave_backend_dependency
+
+sim: sim_alu sim_regfile sim_fu sim_fifo sim_rob sim_rs sim_cdb sim_backend_writeback sim_backend_dependency
 	@echo
 	@echo "================================"
 	@echo "ALL TESTS PASSED"
 	@echo "================================"
 
-sim_alu:
+lint: lint_alu lint_regfile lint_fu lint_fifo lint_rob lint_rs lint_cdb lint_backend_writeback lint_backend_dependency
 	@echo
-	@echo "[BUILD] ALU"
-	@mkdir -p obj_dir/alu
-	@$(VERILATOR) $(SIM_FLAGS) \
-		--Mdir obj_dir/alu \
-		--top-module alu_tb \
-		rtl/common/alu.sv \
-		tb/common/alu_tb.sv \
-		> obj_dir/alu/build.log 2>&1 || { \
-			echo "[ERROR] ALU build failed"; \
-			cat obj_dir/alu/build.log; \
-			exit 1; \
-		}
-	@echo "[TEST]  ALU"
-	@./obj_dir/alu/Valu_tb
+	@echo "ALL LINT CHECKS PASSED"
 
-sim_regfile:
-	@echo
-	@echo "[BUILD] Register file"
-	@mkdir -p obj_dir/regfile
-	@$(VERILATOR) $(SIM_FLAGS) \
-		--Mdir obj_dir/regfile \
-		--top-module regfile_tb \
-		rtl/common/regfile.sv \
-		tb/common/regfile_tb.sv \
-		> obj_dir/regfile/build.log 2>&1 || { \
-			echo "[ERROR] Register-file build failed"; \
-			cat obj_dir/regfile/build.log; \
-			exit 1; \
-		}
-	@echo "[TEST]  Register file"
-	@./obj_dir/regfile/Vregfile_tb
 
-sim_fu:
-	@echo
-	@echo "[BUILD] Fixed-latency FU"
-	@mkdir -p obj_dir/fu
-	@$(VERILATOR) $(SIM_FLAGS) \
-		--Mdir obj_dir/fu \
-		--top-module fixed_latency_fu_tb \
-		rtl/common/fixed_latency_fu.sv \
-		tb/common/fixed_latency_fu_tb.sv \
-		> obj_dir/fu/build.log 2>&1 || { \
-			echo "[ERROR] Fixed-latency FU build failed"; \
-			cat obj_dir/fu/build.log; \
-			exit 1; \
-		}
-	@echo "[TEST]  Fixed-latency FU"
-	@./obj_dir/fu/Vfixed_latency_fu_tb
-
-sim_fifo:
-	@echo
-	@echo "[BUILD] FIFO"
-	@mkdir -p obj_dir/fifo
-	@$(VERILATOR) $(SIM_FLAGS) \
-		--Mdir obj_dir/fifo \
-		--top-module fifo_tb \
-		rtl/common/fifo.sv \
-		tb/common/fifo_tb.sv \
-		> obj_dir/fifo/build.log 2>&1 || { \
-			echo "[ERROR] FIFO build failed"; \
-			cat obj_dir/fifo/build.log; \
-			exit 1; \
-		}
-	@echo "[TEST]  FIFO"
-	@./obj_dir/fifo/Vfifo_tb
-
-sim_rob:
-	@echo
-	@echo "[BUILD] ROB"
-	@mkdir -p obj_dir/rob
-	@$(VERILATOR) $(SIM_FLAGS) \
-		--Mdir obj_dir/rob \
-		--top-module rob_tb \
-		rtl/core/rob.sv \
-		tb/core/rob_tb.sv \
-		> obj_dir/rob/build.log 2>&1 || { \
-			echo "[ERROR] ROB build failed"; \
-			cat obj_dir/rob/build.log; \
-			exit 1; \
-		}
-	@echo "[TEST]  ROB"
-	@./obj_dir/rob/Vrob_tb
-
-sim_rs:
-	@echo
-	@echo "[BUILD] Reservation station"
-	@mkdir -p obj_dir/rs
-	@$(VERILATOR) $(SIM_FLAGS) \
-		--Mdir obj_dir/rs \
-		--top-module reservation_station_tb \
-		rtl/core/reservation_station.sv \
-		tb/core/reservation_station_tb.sv \
-		> obj_dir/rs/build.log 2>&1 || { \
-			echo "[ERROR] Reservation station build failed"; \
-			cat obj_dir/rs/build.log; \
-			exit 1; \
-		}
-	@echo "[TEST]  Reservation station"
-	@./obj_dir/rs/Vreservation_station_tb
-
-sim_cdb:
-	@echo
-	@echo "[BUILD] CDB"
-	@mkdir -p obj_dir/cdb
-	@$(VERILATOR) $(SIM_FLAGS) \
-		--Mdir obj_dir/cdb \
-		--top-module cdb_tb \
-		rtl/core/cdb.sv \
-		tb/core/cdb_tb.sv \
-		> obj_dir/cdb/build.log 2>&1 || { \
-			echo "[ERROR] CDB build failed"; \
-			cat obj_dir/cdb/build.log; \
-			exit 1; \
-		}
-	@echo "[TEST]  CDB"
-	@./obj_dir/cdb/Vcdb_tb
+# --------------------------------------------------------------------
+# Wave targets
+# --------------------------------------------------------------------
 
 wave_alu:
 	@gtkwave alu_tb.vcd
@@ -155,93 +176,16 @@ wave_rs:
 wave_cdb:
 	@gtkwave cdb_tb.vcd
 
-lint: lint_alu lint_regfile lint_fu lint_fifo lint_rob lint_rs lint_cdb
-	@echo
-	@echo "ALL LINT CHECKS PASSED"
+wave_backend_writeback:
+	@gtkwave backend_writeback_tb.vcd
 
-lint_alu:
-	@echo "[LINT]  ALU"
-	@mkdir -p obj_dir/alu
-	@$(VERILATOR) $(LINT_FLAGS) \
-		--top-module alu_tb \
-		rtl/common/alu.sv \
-		tb/common/alu_tb.sv \
-		> obj_dir/alu/lint.log 2>&1 || { \
-			cat obj_dir/alu/lint.log; \
-			exit 1; \
-		}
+wave_backend_dependency:
+	@gtkwave backend_dependency_tb.vcd
 
-lint_regfile:
-	@echo "[LINT]  Register file"
-	@mkdir -p obj_dir/regfile
-	@$(VERILATOR) $(LINT_FLAGS) \
-		--top-module regfile_tb \
-		rtl/common/regfile.sv \
-		tb/common/regfile_tb.sv \
-		> obj_dir/regfile/lint.log 2>&1 || { \
-			cat obj_dir/regfile/lint.log; \
-			exit 1; \
-		}
 
-lint_fu:
-	@echo "[LINT]  Fixed-latency FU"
-	@mkdir -p obj_dir/fu
-	@$(VERILATOR) $(LINT_FLAGS) \
-		--top-module fixed_latency_fu_tb \
-		rtl/common/fixed_latency_fu.sv \
-		tb/common/fixed_latency_fu_tb.sv \
-		> obj_dir/fu/lint.log 2>&1 || { \
-			cat obj_dir/fu/lint.log; \
-			exit 1; \
-		}
-
-lint_fifo:
-	@echo "[LINT]  FIFO"
-	@mkdir -p obj_dir/fifo
-	@$(VERILATOR) $(LINT_FLAGS) \
-		--top-module fifo_tb \
-		rtl/common/fifo.sv \
-		tb/common/fifo_tb.sv \
-		> obj_dir/fifo/lint.log 2>&1 || { \
-			cat obj_dir/fifo/lint.log; \
-			exit 1; \
-		}
-
-lint_rob:
-	@echo "[LINT]  ROB"
-	@mkdir -p obj_dir/rob
-	@$(VERILATOR) $(LINT_FLAGS) \
-		--top-module rob_tb \
-		rtl/core/rob.sv \
-		tb/core/rob_tb.sv \
-		> obj_dir/rob/lint.log 2>&1 || { \
-			cat obj_dir/rob/lint.log; \
-			exit 1; \
-		}
-
-lint_rs:
-	@echo "[LINT]  Reservation station"
-	@mkdir -p obj_dir/rs
-	@$(VERILATOR) $(LINT_FLAGS) \
-		--top-module reservation_station_tb \
-		rtl/core/reservation_station.sv \
-		tb/core/reservation_station_tb.sv \
-		> obj_dir/rs/lint.log 2>&1 || { \
-			cat obj_dir/rs/lint.log; \
-			exit 1; \
-		}
-
-lint_cdb:
-	@echo "[LINT]  CDB"
-	@mkdir -p obj_dir/cdb
-	@$(VERILATOR) $(LINT_FLAGS) \
-		--top-module cdb_tb \
-		rtl/core/cdb.sv \
-		tb/core/cdb_tb.sv \
-		> obj_dir/cdb/lint.log 2>&1 || { \
-			cat obj_dir/cdb/lint.log; \
-			exit 1; \
-		}
+# --------------------------------------------------------------------
+# Cleanup
+# --------------------------------------------------------------------
 
 clean:
 	@rm -rf obj_dir *.vcd *.fst
