@@ -49,6 +49,10 @@ BACKEND_DEPENDENCY_SRCS := \
 	rtl/core/cdb.sv \
 	tb/core/backend_dependency_tb.sv
 
+RENAME_TABLE_SRCS := \
+	rtl/core/rename_table.sv \
+	tb/core/rename_table_tb.sv
+
 
 # --------------------------------------------------------------------
 # Test list
@@ -116,6 +120,7 @@ $(eval $(call SIM_TEMPLATE,rs,reservation_station_tb,RS))
 $(eval $(call SIM_TEMPLATE,cdb,cdb_tb,CDB))
 $(eval $(call SIM_TEMPLATE,backend_writeback,backend_writeback_tb,BACKEND_WRITEBACK))
 $(eval $(call SIM_TEMPLATE,backend_dependency,backend_dependency_tb,BACKEND_DEPENDENCY))
+$(eval $(call SIM_TEMPLATE,rename_table,rename_table_tb,RENAME_TABLE))
 
 $(eval $(call LINT_TEMPLATE,alu,alu_tb,ALU))
 $(eval $(call LINT_TEMPLATE,regfile,regfile_tb,REGFILE))
@@ -126,6 +131,7 @@ $(eval $(call LINT_TEMPLATE,rs,reservation_station_tb,RS))
 $(eval $(call LINT_TEMPLATE,cdb,cdb_tb,CDB))
 $(eval $(call LINT_TEMPLATE,backend_writeback,backend_writeback_tb,BACKEND_WRITEBACK))
 $(eval $(call LINT_TEMPLATE,backend_dependency,backend_dependency_tb,BACKEND_DEPENDENCY))
+$(eval $(call LINT_TEMPLATE,rename_table,rename_table_tb,RENAME_TABLE))
 
 
 # --------------------------------------------------------------------
@@ -134,19 +140,19 @@ $(eval $(call LINT_TEMPLATE,backend_dependency,backend_dependency_tb,BACKEND_DEP
 
 .PHONY: sim lint clean \
 	sim_alu sim_regfile sim_fu sim_fifo sim_rob sim_rs sim_cdb \
-	sim_backend_writeback sim_backend_dependency \
+	sim_backend_writeback sim_backend_dependency sim_rename_table \
 	lint_alu lint_regfile lint_fu lint_fifo lint_rob lint_rs lint_cdb \
-	lint_backend_writeback lint_backend_dependency \
+	lint_backend_writeback lint_backend_dependency lint_rename_table\
 	wave_alu wave_regfile wave_fu wave_fifo wave_rob wave_rs wave_cdb \
 	wave_backend_writeback wave_backend_dependency
 
-sim: sim_alu sim_regfile sim_fu sim_fifo sim_rob sim_rs sim_cdb sim_backend_writeback sim_backend_dependency
+sim: sim_alu sim_regfile sim_fu sim_fifo sim_rob sim_rs sim_cdb sim_backend_writeback sim_backend_dependency sim_rename_table
 	@echo
 	@echo "================================"
 	@echo "ALL TESTS PASSED"
 	@echo "================================"
 
-lint: lint_alu lint_regfile lint_fu lint_fifo lint_rob lint_rs lint_cdb lint_backend_writeback lint_backend_dependency
+lint: lint_alu lint_regfile lint_fu lint_fifo lint_rob lint_rs lint_cdb lint_backend_writeback lint_backend_dependency lint_rename_table
 	@echo
 	@echo "ALL LINT CHECKS PASSED"
 
@@ -182,6 +188,8 @@ wave_backend_writeback:
 wave_backend_dependency:
 	@gtkwave backend_dependency_tb.vcd
 
+wave_rename_table:
+	@gtkwave rename_table_tb.vcd
 
 # --------------------------------------------------------------------
 # Cleanup
