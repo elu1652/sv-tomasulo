@@ -134,8 +134,70 @@ module backend_rename_tb;
     logic [XLEN-1:0]  cdb_value;
 
     // ----------------------------------------------------------------
+    // Decoded instruction input to dispatch
+    // ----------------------------------------------------------------
+
+    logic                  dispatch_valid;
+    logic                  dispatch_ready;
+    logic [OP_W-1:0]       dispatch_op;
+    logic [REG_ADDR_W-1:0] dispatch_src1_reg;
+    logic [REG_ADDR_W-1:0] dispatch_src2_reg;
+    logic [REG_ADDR_W-1:0] dispatch_dest_reg;
+
+    // ----------------------------------------------------------------
     // Module instances
     // ----------------------------------------------------------------
+
+    dispatch #(
+        .XLEN(XLEN),
+        .REG_ADDR_W(REG_ADDR_W),
+        .TAG_W(TAG_W),
+        .OP_W(OP_W)
+    ) dispatch_dut (
+        .dispatch_valid(dispatch_valid),
+        .dispatch_ready(dispatch_ready),
+
+        .dispatch_op(dispatch_op),
+        .dispatch_src1_reg(dispatch_src1_reg),
+        .dispatch_src2_reg(dispatch_src2_reg),
+        .dispatch_dest_reg(dispatch_dest_reg),
+
+        .rf_raddr1(rf_raddr1),
+        .rf_raddr2(rf_raddr2),
+        .rf_rdata1(rf_rdata1),
+        .rf_rdata2(rf_rdata2),
+
+        .rename_src1_reg(rename_src1_reg),
+        .rename_src1_pending(rename_src1_pending),
+        .rename_src1_tag(rename_src1_tag),
+
+        .rename_src2_reg(rename_src2_reg),
+        .rename_src2_pending(rename_src2_pending),
+        .rename_src2_tag(rename_src2_tag),
+
+        .rob_alloc_valid(rob_alloc_valid),
+        .rob_alloc_ready(rob_alloc_ready),
+        .rob_alloc_dest_reg(rob_alloc_dest_reg),
+        .rob_alloc_tag(rob_alloc_tag),
+
+        .rename_valid(rename_valid),
+        .rename_dest_reg(rename_dest_reg),
+        .rename_dest_tag(rename_dest_tag),
+
+        .rs_dispatch_valid(rs_dispatch_valid),
+        .rs_dispatch_ready(rs_dispatch_ready),
+        .rs_dispatch_op(rs_dispatch_op),
+
+        .rs_dispatch_src1_ready(rs_dispatch_src1_ready),
+        .rs_dispatch_src1_value(rs_dispatch_src1_value),
+        .rs_dispatch_src1_tag(rs_dispatch_src1_tag),
+
+        .rs_dispatch_src2_ready(rs_dispatch_src2_ready),
+        .rs_dispatch_src2_value(rs_dispatch_src2_value),
+        .rs_dispatch_src2_tag(rs_dispatch_src2_tag),
+
+        .rs_dispatch_dest_tag(rs_dispatch_dest_tag)
+    );
 
     regfile #(
         .WIDTH(XLEN),
@@ -368,29 +430,13 @@ module backend_rename_tb;
             init_waddr = '0;
             init_wdata = '0;
 
-            rf_raddr1 = '0;
-            rf_raddr2 = '0;
+            dispatch_valid     = 1'b0;
+            dispatch_op        = '0;
+            dispatch_src1_reg  = '0;
+            dispatch_src2_reg  = '0;
+            dispatch_dest_reg  = '0;
 
-            rename_src1_reg = '0;
-            rename_src2_reg = '0;
-
-            rename_valid    = 1'b0;
-            rename_dest_reg = '0;
-            rename_dest_tag = '0;
-
-            rob_alloc_valid    = 1'b0;
-            rob_alloc_dest_reg = '0;
-            rob_commit_ready   = 1'b0;
-
-            rs_dispatch_valid      = 1'b0;
-            rs_dispatch_op         = '0;
-            rs_dispatch_src1_ready = 1'b0;
-            rs_dispatch_src1_value = '0;
-            rs_dispatch_src1_tag   = '0;
-            rs_dispatch_src2_ready = 1'b0;
-            rs_dispatch_src2_value = '0;
-            rs_dispatch_src2_tag   = '0;
-            rs_dispatch_dest_tag   = '0;
+            rob_commit_ready = 1'b0;
 
             repeat (2) @(posedge clk);
 
@@ -460,63 +506,29 @@ module backend_rename_tb;
         begin
             @(negedge clk);
 
-            if (!rob_alloc_ready) begin
-                $display("ERROR: ROB is full during dispatch");
-                $fatal;
-            end
+            // Present one decoded instruction to the dispatch module.
+            dispatch_valid    = 1'b1;
+            dispatch_op       = OP_ADD;
+            dispatch_src1_reg = src1_reg;
+            dispatch_src2_reg = src2_reg;
+            dispatch_dest_reg = dest_reg;
 
-            if (!rs_dispatch_ready) begin
-                $display("ERROR: reservation station is full during dispatch");
-                $fatal;
-            end
-
-            // Select architectural source registers.
-            rf_raddr1 = src1_reg;
-            rf_raddr2 = src2_reg;
-
-            rename_src1_reg = src1_reg;
-            rename_src2_reg = src2_reg;
-
-            // Allow combinational regfile and rename lookups to settle.
+            // Allow the combinational register-file lookup,
+            // rename-table lookup, and dispatch logic to settle.
             #1;
 
-            // The ROB's current tail is the destination tag for this
-            // instruction. Capture it before the allocation edge.
+            if (!dispatch_ready) begin
+                $display(
+                    "ERROR: backend cannot accept ADD R%0d, R%0d, R%0d",
+                    dest_reg,
+                    src1_reg,
+                    src2_reg
+                );
+                $fatal;
+            end
+
+            // Capture the ROB tail tag before the rising edge advances it.
             allocated_tag = rob_alloc_tag;
-
-            rob_alloc_valid    = 1'b1;
-            rob_alloc_dest_reg = dest_reg;
-
-            rename_valid    = 1'b1;
-            rename_dest_reg = dest_reg;
-            rename_dest_tag = allocated_tag;
-
-            rs_dispatch_valid    = 1'b1;
-            rs_dispatch_op       = OP_ADD;
-            rs_dispatch_dest_tag = allocated_tag;
-
-            // If src1 is pending, send its producer tag to the RS.
-            // Otherwise, send its committed register-file value.
-            if (rename_src1_pending) begin
-                rs_dispatch_src1_ready = 1'b0;
-                rs_dispatch_src1_value = '0;
-                rs_dispatch_src1_tag   = rename_src1_tag;
-            end else begin
-                rs_dispatch_src1_ready = 1'b1;
-                rs_dispatch_src1_value = rf_rdata1;
-                rs_dispatch_src1_tag   = '0;
-            end
-
-            // Do the same lookup/selection for src2.
-            if (rename_src2_pending) begin
-                rs_dispatch_src2_ready = 1'b0;
-                rs_dispatch_src2_value = '0;
-                rs_dispatch_src2_tag   = rename_src2_tag;
-            end else begin
-                rs_dispatch_src2_ready = 1'b1;
-                rs_dispatch_src2_value = rf_rdata2;
-                rs_dispatch_src2_tag   = '0;
-            end
 
             $display(
                 "DISPATCH: ADD R%0d, R%0d, R%0d -> ROB%0d",
@@ -554,25 +566,19 @@ module backend_rename_tb;
                 );
             end
 
+            // At this edge, dispatch causes:
+            //   1. ROB allocation
+            //   2. rename-table destination update
+            //   3. reservation-station insertion
             @(posedge clk);
             #1;
 
-            rob_alloc_valid    = 1'b0;
-            rob_alloc_dest_reg = '0;
-
-            rename_valid    = 1'b0;
-            rename_dest_reg = '0;
-            rename_dest_tag = '0;
-
-            rs_dispatch_valid      = 1'b0;
-            rs_dispatch_op         = '0;
-            rs_dispatch_src1_ready = 1'b0;
-            rs_dispatch_src1_value = '0;
-            rs_dispatch_src1_tag   = '0;
-            rs_dispatch_src2_ready = 1'b0;
-            rs_dispatch_src2_value = '0;
-            rs_dispatch_src2_tag   = '0;
-            rs_dispatch_dest_tag   = '0;
+            // Remove the decoded instruction after one successful transfer.
+            dispatch_valid    = 1'b0;
+            dispatch_op       = '0;
+            dispatch_src1_reg = '0;
+            dispatch_src2_reg = '0;
+            dispatch_dest_reg = '0;
         end
     endtask
 
@@ -679,7 +685,8 @@ module backend_rename_tb;
         input logic [XLEN-1:0]       expected_value
     );
         begin
-            rf_raddr1 = reg_id;
+            // Dispatch forwards this source register to the regfile.
+            dispatch_src1_reg = reg_id;
             #1;
 
             if (rf_rdata1 !== expected_value) begin
@@ -704,7 +711,8 @@ module backend_rename_tb;
         input logic [REG_ADDR_W-1:0] reg_id
     );
         begin
-            rename_src1_reg = reg_id;
+            // Dispatch forwards this source register to the rename table.
+            dispatch_src1_reg = reg_id;
             #1;
 
             if (rename_src1_pending) begin

@@ -56,6 +56,7 @@ BACKEND_RENAME_SRCS := \
 	rtl/core/rob.sv \
 	rtl/core/reservation_station.sv \
 	rtl/core/cdb.sv \
+	rtl/core/dispatch.sv \
 	tb/core/backend_rename_tb.sv
 
 RENAME_TABLE_SRCS := \
