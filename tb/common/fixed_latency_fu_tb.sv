@@ -16,6 +16,7 @@ module fixed_latency_fu_tb;
 
     logic                 busy;
     logic                 result_valid;
+    logic                 result_ready;
     logic [WIDTH-1:0]     result;
     logic [TAG_WIDTH-1:0] result_tag;
 
@@ -33,6 +34,7 @@ module fixed_latency_fu_tb;
         .tag_in(input_tag),
         .busy(busy),
         .result_valid(result_valid),
+        .result_ready(result_ready),
         .result(result),
         .result_tag(result_tag)
     );
@@ -129,6 +131,7 @@ module fixed_latency_fu_tb;
         operand_a = '0;
         operand_b = '0;
         input_tag = '0;
+        result_ready = 1'b0;
 
         repeat (2) @(posedge clk);
         @(negedge clk);
@@ -151,13 +154,69 @@ module fixed_latency_fu_tb;
             3'd4
         );
 
+        // The FU must hold the completed result while the consumer
+        // is not ready to accept it.
+        repeat (2) begin
+            @(posedge clk);
+            #1;
+
+            if (!result_valid) begin
+                $display(
+                    "ERROR: result_valid should remain high while result_ready=0"
+                );
+                $fatal;
+            end
+
+            if (!busy) begin
+                $display(
+                    "ERROR: FU should remain busy while holding a result"
+                );
+                $fatal;
+            end
+
+            if (result !== 32'd42) begin
+                $display(
+                    "ERROR: held result changed, expected 42, got %0d",
+                    result
+                );
+                $fatal;
+            end
+
+            if (result_tag !== 3'd4) begin
+                $display(
+                    "ERROR: held tag changed, expected 4, got %0d",
+                    result_tag
+                );
+                $fatal;
+            end
+        end
+
+        $display("SUCCESS: result held while consumer not ready");
+
+        // Accept the held result.
+        @(negedge clk);
+        result_ready = 1'b1;
+
         @(posedge clk);
         #1;
 
+        result_ready = 1'b0;
+
         if (result_valid) begin
-            $display("ERROR: result_valid should only stay high for one cycle");
+            $display(
+                "ERROR: result_valid should clear after result handshake"
+            );
             $fatal;
         end
+
+        if (busy) begin
+            $display(
+                "ERROR: FU should return to idle after result handshake"
+            );
+            $fatal;
+        end
+
+        $display("SUCCESS: result accepted and FU returned to idle");
 
         start_operation(
             4'd0,
@@ -170,6 +229,21 @@ module fixed_latency_fu_tb;
             32'd30,
             3'd6
         );
+
+        @(negedge clk);
+        result_ready = 1'b1;
+
+        @(posedge clk);
+        #1;
+
+        result_ready = 1'b0;
+
+        if (busy || result_valid) begin
+            $display(
+                "ERROR: FU should be idle after accepting second result"
+            );
+            $fatal;
+        end
 
         $display("FIXED LATENCY FU TEST PASSED");
         $finish;

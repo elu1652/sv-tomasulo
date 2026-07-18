@@ -153,6 +153,7 @@ module backend_writeback_tb;
 
         .busy(fu_busy),
         .result_valid(fu_result_valid),
+        .result_ready(1'b1),
         .result(fu_result),
         .result_tag(fu_result_tag)
     );
