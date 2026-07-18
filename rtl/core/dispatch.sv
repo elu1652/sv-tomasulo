@@ -41,26 +41,58 @@ module dispatch #(
     output logic [REG_ADDR_W-1:0] rename_dest_reg,
     output logic [TAG_W-1:0]      rename_dest_tag,
 
-    // Reservation-station dispatch
-    output logic                  rs_dispatch_valid,
-    input  logic                  rs_dispatch_ready,
-    output logic [OP_W-1:0]       rs_dispatch_op,
+    // ALU reservation-station dispatch
+    output logic                  alu_rs_dispatch_valid,
+    input  logic                  alu_rs_dispatch_ready,
+    output logic [OP_W-1:0]       alu_rs_dispatch_op,
 
-    output logic                  rs_dispatch_src1_ready,
-    output logic [XLEN-1:0]       rs_dispatch_src1_value,
-    output logic [TAG_W-1:0]      rs_dispatch_src1_tag,
+    output logic                  alu_rs_dispatch_src1_ready,
+    output logic [XLEN-1:0]       alu_rs_dispatch_src1_value,
+    output logic [TAG_W-1:0]      alu_rs_dispatch_src1_tag,
 
-    output logic                  rs_dispatch_src2_ready,
-    output logic [XLEN-1:0]       rs_dispatch_src2_value,
-    output logic [TAG_W-1:0]      rs_dispatch_src2_tag,
+    output logic                  alu_rs_dispatch_src2_ready,
+    output logic [XLEN-1:0]       alu_rs_dispatch_src2_value,
+    output logic [TAG_W-1:0]      alu_rs_dispatch_src2_tag,
 
-    output logic [TAG_W-1:0]      rs_dispatch_dest_tag
+    output logic [TAG_W-1:0]      alu_rs_dispatch_dest_tag,
+
+    // Multiply reservation-station dispatch
+    output logic                  mul_rs_dispatch_valid,
+    input  logic                  mul_rs_dispatch_ready,
+    output logic [OP_W-1:0]       mul_rs_dispatch_op,
+
+    output logic                  mul_rs_dispatch_src1_ready,
+    output logic [XLEN-1:0]       mul_rs_dispatch_src1_value,
+    output logic [TAG_W-1:0]      mul_rs_dispatch_src1_tag,
+
+    output logic                  mul_rs_dispatch_src2_ready,
+    output logic [XLEN-1:0]       mul_rs_dispatch_src2_value,
+    output logic [TAG_W-1:0]      mul_rs_dispatch_src2_tag,
+
+    output logic [TAG_W-1:0]      mul_rs_dispatch_dest_tag
 );
 
+    localparam logic [OP_W-1:0] OP_MUL = OP_W'(5);
+
+    logic instruction_is_mul;
+    logic selected_rs_ready;
     logic dispatch_fire;
 
+    // Internal formatted source operands
+    logic             formatted_src1_ready;
+    logic [XLEN-1:0]  formatted_src1_value;
+    logic [TAG_W-1:0] formatted_src1_tag;
+
+    logic             formatted_src2_ready;
+    logic [XLEN-1:0]  formatted_src2_value;
+    logic [TAG_W-1:0] formatted_src2_tag;
+
     always_comb begin
-        // The register file and rename table look up the same
+        // ------------------------------------------------------------
+        // Source-register lookups
+        // ------------------------------------------------------------
+
+        // The register file and rename table both look up the decoded
         // architectural source registers.
         rf_raddr1 = dispatch_src1_reg;
         rf_raddr2 = dispatch_src2_reg;
@@ -68,51 +100,106 @@ module dispatch #(
         rename_src1_reg = dispatch_src1_reg;
         rename_src2_reg = dispatch_src2_reg;
 
-        // Dispatch succeeds only if both the ROB and reservation
-        // station can accept the instruction.
-        dispatch_ready = rob_alloc_ready && rs_dispatch_ready;
+        // ------------------------------------------------------------
+        // Operation classification
+        // ------------------------------------------------------------
+
+        instruction_is_mul = (dispatch_op == OP_MUL);
+
+        // Only the selected reservation station needs to be ready.
+        if (instruction_is_mul) begin
+            selected_rs_ready = mul_rs_dispatch_ready;
+        end else begin
+            selected_rs_ready = alu_rs_dispatch_ready;
+        end
+
+        // ------------------------------------------------------------
+        // Atomic dispatch handshake
+        // ------------------------------------------------------------
+
+        // Every instruction requires a ROB entry and space in its
+        // selected reservation station.
+        dispatch_ready = rob_alloc_ready && selected_rs_ready;
         dispatch_fire  = dispatch_valid && dispatch_ready;
 
-        // These three updates must happen together.
-        rob_alloc_valid   = dispatch_fire;
-        rename_valid      = dispatch_fire;
-        rs_dispatch_valid = dispatch_fire;
+        // Every successfully dispatched instruction allocates a ROB
+        // entry and updates the rename table.
+        rob_alloc_valid = dispatch_fire;
+        rename_valid    = dispatch_fire;
 
-        // The ROB stores the architectural destination register.
+        // Only one reservation station receives the instruction.
+        alu_rs_dispatch_valid =
+            dispatch_fire && !instruction_is_mul;
+
+        mul_rs_dispatch_valid =
+            dispatch_fire && instruction_is_mul;
+
+        // ------------------------------------------------------------
+        // ROB and rename-table destination information
+        // ------------------------------------------------------------
+
         rob_alloc_dest_reg = dispatch_dest_reg;
 
-        // The allocated ROB tag becomes the newest producer of the
-        // architectural destination register.
         rename_dest_reg = dispatch_dest_reg;
         rename_dest_tag = rob_alloc_tag;
 
-        // The same ROB tag travels with the instruction through the RS
-        // and functional unit.
-        rs_dispatch_op       = dispatch_op;
-        rs_dispatch_dest_tag = rob_alloc_tag;
+        // ------------------------------------------------------------
+        // Format source operand 1
+        // ------------------------------------------------------------
 
-        // Source operand 1 becomes either a waiting producer tag or a
-        // ready committed register-file value.
         if (rename_src1_pending) begin
-            rs_dispatch_src1_ready = 1'b0;
-            rs_dispatch_src1_value = '0;
-            rs_dispatch_src1_tag   = rename_src1_tag;
+            formatted_src1_ready = 1'b0;
+            formatted_src1_value = '0;
+            formatted_src1_tag   = rename_src1_tag;
         end else begin
-            rs_dispatch_src1_ready = 1'b1;
-            rs_dispatch_src1_value = rf_rdata1;
-            rs_dispatch_src1_tag   = '0;
+            formatted_src1_ready = 1'b1;
+            formatted_src1_value = rf_rdata1;
+            formatted_src1_tag   = '0;
         end
 
-        // Source operand 2 is handled in the same way.
+        // ------------------------------------------------------------
+        // Format source operand 2
+        // ------------------------------------------------------------
+
         if (rename_src2_pending) begin
-            rs_dispatch_src2_ready = 1'b0;
-            rs_dispatch_src2_value = '0;
-            rs_dispatch_src2_tag   = rename_src2_tag;
+            formatted_src2_ready = 1'b0;
+            formatted_src2_value = '0;
+            formatted_src2_tag   = rename_src2_tag;
         end else begin
-            rs_dispatch_src2_ready = 1'b1;
-            rs_dispatch_src2_value = rf_rdata2;
-            rs_dispatch_src2_tag   = '0;
+            formatted_src2_ready = 1'b1;
+            formatted_src2_value = rf_rdata2;
+            formatted_src2_tag   = '0;
         end
+
+        // ------------------------------------------------------------
+        // ALU reservation-station packet
+        // ------------------------------------------------------------
+
+        alu_rs_dispatch_op       = dispatch_op;
+        alu_rs_dispatch_dest_tag = rob_alloc_tag;
+
+        alu_rs_dispatch_src1_ready = formatted_src1_ready;
+        alu_rs_dispatch_src1_value = formatted_src1_value;
+        alu_rs_dispatch_src1_tag   = formatted_src1_tag;
+
+        alu_rs_dispatch_src2_ready = formatted_src2_ready;
+        alu_rs_dispatch_src2_value = formatted_src2_value;
+        alu_rs_dispatch_src2_tag   = formatted_src2_tag;
+
+        // ------------------------------------------------------------
+        // Multiply reservation-station packet
+        // ------------------------------------------------------------
+
+        mul_rs_dispatch_op       = dispatch_op;
+        mul_rs_dispatch_dest_tag = rob_alloc_tag;
+
+        mul_rs_dispatch_src1_ready = formatted_src1_ready;
+        mul_rs_dispatch_src1_value = formatted_src1_value;
+        mul_rs_dispatch_src1_tag   = formatted_src1_tag;
+
+        mul_rs_dispatch_src2_ready = formatted_src2_ready;
+        mul_rs_dispatch_src2_value = formatted_src2_value;
+        mul_rs_dispatch_src2_tag   = formatted_src2_tag;
     end
 
 endmodule

@@ -9,6 +9,7 @@ module dispatch_tb;
 
     localparam logic [OP_W-1:0] OP_ADD = 4'd0;
     localparam logic [OP_W-1:0] OP_SUB = 4'd1;
+    localparam logic [OP_W-1:0] OP_MUL = 4'd5;
 
     // ----------------------------------------------------------------
     // Decoded instruction input
@@ -61,22 +62,40 @@ module dispatch_tb;
     logic [TAG_W-1:0]      rename_dest_tag;
 
     // ----------------------------------------------------------------
-    // Reservation-station dispatch
+    // ALU reservation-station dispatch
     // ----------------------------------------------------------------
 
-    logic                  rs_dispatch_valid;
-    logic                  rs_dispatch_ready;
-    logic [OP_W-1:0]       rs_dispatch_op;
+    logic                  alu_rs_dispatch_valid;
+    logic                  alu_rs_dispatch_ready;
+    logic [OP_W-1:0]       alu_rs_dispatch_op;
 
-    logic                  rs_dispatch_src1_ready;
-    logic [XLEN-1:0]       rs_dispatch_src1_value;
-    logic [TAG_W-1:0]      rs_dispatch_src1_tag;
+    logic                  alu_rs_dispatch_src1_ready;
+    logic [XLEN-1:0]       alu_rs_dispatch_src1_value;
+    logic [TAG_W-1:0]      alu_rs_dispatch_src1_tag;
 
-    logic                  rs_dispatch_src2_ready;
-    logic [XLEN-1:0]       rs_dispatch_src2_value;
-    logic [TAG_W-1:0]      rs_dispatch_src2_tag;
+    logic                  alu_rs_dispatch_src2_ready;
+    logic [XLEN-1:0]       alu_rs_dispatch_src2_value;
+    logic [TAG_W-1:0]      alu_rs_dispatch_src2_tag;
 
-    logic [TAG_W-1:0]      rs_dispatch_dest_tag;
+    logic [TAG_W-1:0]      alu_rs_dispatch_dest_tag;
+
+    // ----------------------------------------------------------------
+    // Multiply reservation-station dispatch
+    // ----------------------------------------------------------------
+
+    logic                  mul_rs_dispatch_valid;
+    logic                  mul_rs_dispatch_ready;
+    logic [OP_W-1:0]       mul_rs_dispatch_op;
+
+    logic                  mul_rs_dispatch_src1_ready;
+    logic [XLEN-1:0]       mul_rs_dispatch_src1_value;
+    logic [TAG_W-1:0]      mul_rs_dispatch_src1_tag;
+
+    logic                  mul_rs_dispatch_src2_ready;
+    logic [XLEN-1:0]       mul_rs_dispatch_src2_value;
+    logic [TAG_W-1:0]      mul_rs_dispatch_src2_tag;
+
+    logic [TAG_W-1:0]      mul_rs_dispatch_dest_tag;
 
     // ----------------------------------------------------------------
     // DUT
@@ -118,19 +137,33 @@ module dispatch_tb;
         .rename_dest_reg(rename_dest_reg),
         .rename_dest_tag(rename_dest_tag),
 
-        .rs_dispatch_valid(rs_dispatch_valid),
-        .rs_dispatch_ready(rs_dispatch_ready),
-        .rs_dispatch_op(rs_dispatch_op),
+        .alu_rs_dispatch_valid(alu_rs_dispatch_valid),
+        .alu_rs_dispatch_ready(alu_rs_dispatch_ready),
+        .alu_rs_dispatch_op(alu_rs_dispatch_op),
 
-        .rs_dispatch_src1_ready(rs_dispatch_src1_ready),
-        .rs_dispatch_src1_value(rs_dispatch_src1_value),
-        .rs_dispatch_src1_tag(rs_dispatch_src1_tag),
+        .alu_rs_dispatch_src1_ready(alu_rs_dispatch_src1_ready),
+        .alu_rs_dispatch_src1_value(alu_rs_dispatch_src1_value),
+        .alu_rs_dispatch_src1_tag(alu_rs_dispatch_src1_tag),
 
-        .rs_dispatch_src2_ready(rs_dispatch_src2_ready),
-        .rs_dispatch_src2_value(rs_dispatch_src2_value),
-        .rs_dispatch_src2_tag(rs_dispatch_src2_tag),
+        .alu_rs_dispatch_src2_ready(alu_rs_dispatch_src2_ready),
+        .alu_rs_dispatch_src2_value(alu_rs_dispatch_src2_value),
+        .alu_rs_dispatch_src2_tag(alu_rs_dispatch_src2_tag),
 
-        .rs_dispatch_dest_tag(rs_dispatch_dest_tag)
+        .alu_rs_dispatch_dest_tag(alu_rs_dispatch_dest_tag),
+
+        .mul_rs_dispatch_valid(mul_rs_dispatch_valid),
+        .mul_rs_dispatch_ready(mul_rs_dispatch_ready),
+        .mul_rs_dispatch_op(mul_rs_dispatch_op),
+
+        .mul_rs_dispatch_src1_ready(mul_rs_dispatch_src1_ready),
+        .mul_rs_dispatch_src1_value(mul_rs_dispatch_src1_value),
+        .mul_rs_dispatch_src1_tag(mul_rs_dispatch_src1_tag),
+
+        .mul_rs_dispatch_src2_ready(mul_rs_dispatch_src2_ready),
+        .mul_rs_dispatch_src2_value(mul_rs_dispatch_src2_value),
+        .mul_rs_dispatch_src2_tag(mul_rs_dispatch_src2_tag),
+
+        .mul_rs_dispatch_dest_tag(mul_rs_dispatch_dest_tag)
     );
 
     // ----------------------------------------------------------------
@@ -139,24 +172,26 @@ module dispatch_tb;
 
     task automatic set_defaults;
         begin
-            dispatch_valid     = 1'b0;
-            dispatch_op        = '0;
-            dispatch_src1_reg  = '0;
-            dispatch_src2_reg  = '0;
-            dispatch_dest_reg  = '0;
+            dispatch_valid    = 1'b0;
+            dispatch_op       = '0;
+            dispatch_src1_reg = '0;
+            dispatch_src2_reg = '0;
+            dispatch_dest_reg = '0;
 
             rf_rdata1 = '0;
             rf_rdata2 = '0;
 
             rename_src1_pending = 1'b0;
             rename_src1_tag     = '0;
+
             rename_src2_pending = 1'b0;
             rename_src2_tag     = '0;
 
             rob_alloc_ready = 1'b0;
             rob_alloc_tag   = '0;
 
-            rs_dispatch_ready = 1'b0;
+            alu_rs_dispatch_ready = 1'b0;
+            mul_rs_dispatch_ready = 1'b0;
 
             #1;
         end
@@ -164,7 +199,9 @@ module dispatch_tb;
 
     task automatic expect_control_outputs(
         input logic expected_ready,
-        input logic expected_fire
+        input logic expected_fire,
+        input logic expected_alu_valid,
+        input logic expected_mul_valid
     );
         begin
             if (dispatch_ready !== expected_ready) begin
@@ -194,11 +231,20 @@ module dispatch_tb;
                 $fatal;
             end
 
-            if (rs_dispatch_valid !== expected_fire) begin
+            if (alu_rs_dispatch_valid !== expected_alu_valid) begin
                 $display(
-                    "ERROR: expected rs_dispatch_valid=%0b, got %0b",
-                    expected_fire,
-                    rs_dispatch_valid
+                    "ERROR: expected alu_rs_dispatch_valid=%0b, got %0b",
+                    expected_alu_valid,
+                    alu_rs_dispatch_valid
+                );
+                $fatal;
+            end
+
+            if (mul_rs_dispatch_valid !== expected_mul_valid) begin
+                $display(
+                    "ERROR: expected mul_rs_dispatch_valid=%0b, got %0b",
+                    expected_mul_valid,
+                    mul_rs_dispatch_valid
                 );
                 $fatal;
             end
@@ -280,12 +326,81 @@ module dispatch_tb;
                 $fatal;
             end
 
-            if (rs_dispatch_dest_tag !== expected_dest_tag) begin
+            if (alu_rs_dispatch_dest_tag !== expected_dest_tag) begin
                 $display(
-                    "ERROR: expected RS destination ROB%0d, got ROB%0d",
+                    "ERROR: expected ALU RS destination ROB%0d, got ROB%0d",
                     expected_dest_tag,
-                    rs_dispatch_dest_tag
+                    alu_rs_dispatch_dest_tag
                 );
+                $fatal;
+            end
+
+            if (mul_rs_dispatch_dest_tag !== expected_dest_tag) begin
+                $display(
+                    "ERROR: expected MUL RS destination ROB%0d, got ROB%0d",
+                    expected_dest_tag,
+                    mul_rs_dispatch_dest_tag
+                );
+                $fatal;
+            end
+        end
+    endtask
+
+    task automatic expect_alu_operands(
+        input logic             expected_src1_ready,
+        input logic [XLEN-1:0]  expected_src1_value,
+        input logic [TAG_W-1:0] expected_src1_tag,
+
+        input logic             expected_src2_ready,
+        input logic [XLEN-1:0]  expected_src2_value,
+        input logic [TAG_W-1:0] expected_src2_tag
+    );
+        begin
+            if (
+                alu_rs_dispatch_src1_ready !== expected_src1_ready ||
+                alu_rs_dispatch_src1_value !== expected_src1_value ||
+                alu_rs_dispatch_src1_tag   !== expected_src1_tag
+            ) begin
+                $display("ERROR: incorrect ALU RS source 1 packet");
+                $fatal;
+            end
+
+            if (
+                alu_rs_dispatch_src2_ready !== expected_src2_ready ||
+                alu_rs_dispatch_src2_value !== expected_src2_value ||
+                alu_rs_dispatch_src2_tag   !== expected_src2_tag
+            ) begin
+                $display("ERROR: incorrect ALU RS source 2 packet");
+                $fatal;
+            end
+        end
+    endtask
+
+    task automatic expect_mul_operands(
+        input logic             expected_src1_ready,
+        input logic [XLEN-1:0]  expected_src1_value,
+        input logic [TAG_W-1:0] expected_src1_tag,
+
+        input logic             expected_src2_ready,
+        input logic [XLEN-1:0]  expected_src2_value,
+        input logic [TAG_W-1:0] expected_src2_tag
+    );
+        begin
+            if (
+                mul_rs_dispatch_src1_ready !== expected_src1_ready ||
+                mul_rs_dispatch_src1_value !== expected_src1_value ||
+                mul_rs_dispatch_src1_tag   !== expected_src1_tag
+            ) begin
+                $display("ERROR: incorrect MUL RS source 1 packet");
+                $fatal;
+            end
+
+            if (
+                mul_rs_dispatch_src2_ready !== expected_src2_ready ||
+                mul_rs_dispatch_src2_value !== expected_src2_value ||
+                mul_rs_dispatch_src2_tag   !== expected_src2_tag
+            ) begin
+                $display("ERROR: incorrect MUL RS source 2 packet");
                 $fatal;
             end
         end
@@ -302,7 +417,8 @@ module dispatch_tb;
         set_defaults();
 
         // ------------------------------------------------------------
-        // Test 1: both sources ready from the register file
+        // Test 1: ADD routes to ALU RS with both sources ready
+        // ADD R1, R2, R3
         // ------------------------------------------------------------
 
         dispatch_valid    = 1'b1;
@@ -320,46 +436,44 @@ module dispatch_tb;
         rob_alloc_ready = 1'b1;
         rob_alloc_tag   = 2'd0;
 
-        rs_dispatch_ready = 1'b1;
+        alu_rs_dispatch_ready = 1'b1;
+        mul_rs_dispatch_ready = 1'b1;
 
         #1;
 
-        expect_control_outputs(1'b1, 1'b1);
+        expect_control_outputs(
+            1'b1,
+            1'b1,
+            1'b1,
+            1'b0
+        );
+
         expect_lookup_addresses(3'd2, 3'd3);
         expect_destination_outputs(3'd1, 2'd0);
 
-        if (rs_dispatch_op !== OP_ADD) begin
-            $display("ERROR: operation was not forwarded correctly");
+        if (alu_rs_dispatch_op !== OP_ADD) begin
+            $display("ERROR: ADD operation was not sent to ALU RS");
             $fatal;
         end
 
-        if (
-            !rs_dispatch_src1_ready ||
-            rs_dispatch_src1_value !== 32'd10 ||
-            rs_dispatch_src1_tag !== '0
-        ) begin
-            $display("ERROR: source 1 ready-value conversion failed");
-            $fatal;
-        end
+        expect_alu_operands(
+            1'b1,
+            32'd10,
+            '0,
+            1'b1,
+            32'd20,
+            '0
+        );
 
-        if (
-            !rs_dispatch_src2_ready ||
-            rs_dispatch_src2_value !== 32'd20 ||
-            rs_dispatch_src2_tag !== '0
-        ) begin
-            $display("ERROR: source 2 ready-value conversion failed");
-            $fatal;
-        end
-
-        $display("SUCCESS: both sources ready");
+        $display("SUCCESS: ADD routed to ALU RS");
 
         // ------------------------------------------------------------
-        // Test 2: source 1 pending, source 2 ready
-        // ADD R4, R1, R5
-        // R1 waits for ROB0, R5 contains 5, destination receives ROB1
+        // Test 2: MUL routes to MUL RS
+        // MUL R4, R1, R5
+        // R1 waits for ROB0; R5 contains 5
         // ------------------------------------------------------------
 
-        dispatch_op       = OP_ADD;
+        dispatch_op       = OP_MUL;
         dispatch_src1_reg = 3'd1;
         dispatch_src2_reg = 3'd5;
         dispatch_dest_reg = 3'd4;
@@ -377,32 +491,34 @@ module dispatch_tb;
 
         #1;
 
-        expect_control_outputs(1'b1, 1'b1);
+        expect_control_outputs(
+            1'b1,
+            1'b1,
+            1'b0,
+            1'b1
+        );
+
         expect_lookup_addresses(3'd1, 3'd5);
         expect_destination_outputs(3'd4, 2'd1);
 
-        if (
-            rs_dispatch_src1_ready !== 1'b0 ||
-            rs_dispatch_src1_value !== '0 ||
-            rs_dispatch_src1_tag !== 2'd0
-        ) begin
-            $display("ERROR: source 1 pending-tag conversion failed");
+        if (mul_rs_dispatch_op !== OP_MUL) begin
+            $display("ERROR: MUL operation was not sent to MUL RS");
             $fatal;
         end
 
-        if (
-            rs_dispatch_src2_ready !== 1'b1 ||
-            rs_dispatch_src2_value !== 32'd5 ||
-            rs_dispatch_src2_tag !== '0
-        ) begin
-            $display("ERROR: source 2 ready-value conversion failed");
-            $fatal;
-        end
+        expect_mul_operands(
+            1'b0,
+            '0,
+            2'd0,
+            1'b1,
+            32'd5,
+            '0
+        );
 
-        $display("SUCCESS: source 1 pending, source 2 ready");
+        $display("SUCCESS: MUL routed to MUL RS");
 
         // ------------------------------------------------------------
-        // Test 3: source 1 ready, source 2 pending
+        // Test 3: SUB routes to ALU RS with source 2 pending
         // ------------------------------------------------------------
 
         dispatch_op       = OP_SUB;
@@ -423,40 +539,36 @@ module dispatch_tb;
 
         #1;
 
-        expect_control_outputs(1'b1, 1'b1);
-        expect_lookup_addresses(3'd2, 3'd6);
+        expect_control_outputs(
+            1'b1,
+            1'b1,
+            1'b1,
+            1'b0
+        );
+
         expect_destination_outputs(3'd7, 2'd3);
 
-        if (
-            rs_dispatch_src1_ready !== 1'b1 ||
-            rs_dispatch_src1_value !== 32'd40 ||
-            rs_dispatch_src1_tag !== '0
-        ) begin
-            $display("ERROR: source 1 ready-value conversion failed");
+        if (alu_rs_dispatch_op !== OP_SUB) begin
+            $display("ERROR: SUB operation was not sent to ALU RS");
             $fatal;
         end
 
-        if (
-            rs_dispatch_src2_ready !== 1'b0 ||
-            rs_dispatch_src2_value !== '0 ||
-            rs_dispatch_src2_tag !== 2'd2
-        ) begin
-            $display("ERROR: source 2 pending-tag conversion failed");
-            $fatal;
-        end
+        expect_alu_operands(
+            1'b1,
+            32'd40,
+            '0,
+            1'b0,
+            '0,
+            2'd2
+        );
 
-        if (rs_dispatch_op !== OP_SUB) begin
-            $display("ERROR: SUB operation was not forwarded correctly");
-            $fatal;
-        end
-
-        $display("SUCCESS: source 1 ready, source 2 pending");
+        $display("SUCCESS: SUB routed to ALU RS with pending source");
 
         // ------------------------------------------------------------
-        // Test 4: both sources pending
+        // Test 4: both pending operands route correctly to MUL RS
         // ------------------------------------------------------------
 
-        dispatch_op       = OP_ADD;
+        dispatch_op       = OP_MUL;
         dispatch_src1_reg = 3'd1;
         dispatch_src2_reg = 3'd4;
         dispatch_dest_reg = 3'd6;
@@ -471,81 +583,140 @@ module dispatch_tb;
 
         #1;
 
-        expect_control_outputs(1'b1, 1'b1);
-        expect_lookup_addresses(3'd1, 3'd4);
-        expect_destination_outputs(3'd6, 2'd3);
+        expect_control_outputs(
+            1'b1,
+            1'b1,
+            1'b0,
+            1'b1
+        );
 
-        if (
-            rs_dispatch_src1_ready !== 1'b0 ||
-            rs_dispatch_src1_value !== '0 ||
-            rs_dispatch_src1_tag !== 2'd1
-        ) begin
-            $display("ERROR: source 1 pending conversion failed");
-            $fatal;
-        end
+        expect_mul_operands(
+            1'b0,
+            '0,
+            2'd1,
+            1'b0,
+            '0,
+            2'd2
+        );
 
-        if (
-            rs_dispatch_src2_ready !== 1'b0 ||
-            rs_dispatch_src2_value !== '0 ||
-            rs_dispatch_src2_tag !== 2'd2
-        ) begin
-            $display("ERROR: source 2 pending conversion failed");
-            $fatal;
-        end
-
-        $display("SUCCESS: both sources pending");
+        $display("SUCCESS: both pending operands sent to MUL RS");
 
         // ------------------------------------------------------------
-        // Test 5: ROB full blocks dispatch
+        // Test 5: ROB full blocks ADD
         // ------------------------------------------------------------
 
-        rob_alloc_ready  = 1'b0;
-        rs_dispatch_ready = 1'b1;
-        dispatch_valid    = 1'b1;
+        dispatch_op          = OP_ADD;
+        dispatch_valid       = 1'b1;
+        rob_alloc_ready      = 1'b0;
+        alu_rs_dispatch_ready = 1'b1;
+        mul_rs_dispatch_ready = 1'b1;
 
         #1;
 
-        expect_control_outputs(1'b0, 1'b0);
+        expect_control_outputs(
+            1'b0,
+            1'b0,
+            1'b0,
+            1'b0
+        );
 
-        $display("SUCCESS: ROB backpressure blocks dispatch");
+        $display("SUCCESS: ROB backpressure blocks ADD");
 
         // ------------------------------------------------------------
-        // Test 6: RS full blocks dispatch
+        // Test 6: ALU RS full blocks ADD
         // ------------------------------------------------------------
 
-        rob_alloc_ready   = 1'b1;
-        rs_dispatch_ready = 1'b0;
+        rob_alloc_ready       = 1'b1;
+        alu_rs_dispatch_ready = 1'b0;
+        mul_rs_dispatch_ready = 1'b1;
+        dispatch_op           = OP_ADD;
 
         #1;
 
-        expect_control_outputs(1'b0, 1'b0);
+        expect_control_outputs(
+            1'b0,
+            1'b0,
+            1'b0,
+            1'b0
+        );
 
-        $display("SUCCESS: RS backpressure blocks dispatch");
+        $display("SUCCESS: ALU RS backpressure blocks ADD");
 
         // ------------------------------------------------------------
-        // Test 7: both downstream structures unavailable
+        // Test 7: MUL RS full blocks MUL
         // ------------------------------------------------------------
 
-        rob_alloc_ready   = 1'b0;
-        rs_dispatch_ready = 1'b0;
+        alu_rs_dispatch_ready = 1'b1;
+        mul_rs_dispatch_ready = 1'b0;
+        dispatch_op           = OP_MUL;
 
         #1;
 
-        expect_control_outputs(1'b0, 1'b0);
+        expect_control_outputs(
+            1'b0,
+            1'b0,
+            1'b0,
+            1'b0
+        );
 
-        $display("SUCCESS: combined backpressure blocks dispatch");
+        $display("SUCCESS: MUL RS backpressure blocks MUL");
 
         // ------------------------------------------------------------
-        // Test 8: downstream ready, but no valid instruction
+        // Test 8: full MUL RS does not block ADD
         // ------------------------------------------------------------
 
-        rob_alloc_ready   = 1'b1;
-        rs_dispatch_ready = 1'b1;
-        dispatch_valid    = 1'b0;
+        alu_rs_dispatch_ready = 1'b1;
+        mul_rs_dispatch_ready = 1'b0;
+        dispatch_op           = OP_ADD;
 
         #1;
 
-        expect_control_outputs(1'b1, 1'b0);
+        expect_control_outputs(
+            1'b1,
+            1'b1,
+            1'b1,
+            1'b0
+        );
+
+        $display("SUCCESS: MUL RS does not block ADD");
+
+        // ------------------------------------------------------------
+        // Test 9: full ALU RS does not block MUL
+        // ------------------------------------------------------------
+
+        alu_rs_dispatch_ready = 1'b0;
+        mul_rs_dispatch_ready = 1'b1;
+        dispatch_op           = OP_MUL;
+
+        #1;
+
+        expect_control_outputs(
+            1'b1,
+            1'b1,
+            1'b0,
+            1'b1
+        );
+
+        $display("SUCCESS: ALU RS does not block MUL");
+
+        // ------------------------------------------------------------
+        // Test 10: no valid instruction causes no state updates
+        // ------------------------------------------------------------
+
+        dispatch_valid        = 1'b0;
+        rob_alloc_ready       = 1'b1;
+        alu_rs_dispatch_ready = 1'b1;
+        mul_rs_dispatch_ready = 1'b1;
+        dispatch_op           = OP_ADD;
+
+        #1;
+
+        expect_control_outputs(
+            1'b1,
+            1'b0,
+            1'b0,
+            1'b0
+        );
 
         $display("SUCCESS: invalid input causes no state updates");
 
