@@ -3,6 +3,8 @@ VERILATOR := verilator
 SIM_FLAGS  := --binary --trace --timing -Wall -Wno-fatal
 LINT_FLAGS := --lint-only --timing -Wall -Wno-fatal
 
+.DEFAULT_GOAL := sim
+
 # --------------------------------------------------------------------
 # Test source lists
 # --------------------------------------------------------------------
@@ -81,22 +83,15 @@ BACKEND_OOO_SRCS := \
 	rtl/core/cdb_arbiter.sv \
 	tb/core/backend_ooo_tb.sv
 
-
-# --------------------------------------------------------------------
-# Test list
-# Format: name:top_module
-# --------------------------------------------------------------------
-
-TESTS := \
-	alu:alu_tb \
-	regfile:regfile_tb \
-	fu:fixed_latency_fu_tb \
-	fifo:fifo_tb \
-	rob:rob_tb \
-	rs:reservation_station_tb \
-	cdb:cdb_tb \
-	backend_writeback:backend_writeback_tb \
-	backend_dependency:backend_dependency_tb
+BACKEND_CROSS_FU_DEPENDENCY_SRCS := \
+	rtl/common/regfile.sv \
+	rtl/common/fixed_latency_fu.sv \
+	rtl/core/dispatch.sv \
+	rtl/core/rename_table.sv \
+	rtl/core/rob.sv \
+	rtl/core/reservation_station.sv \
+	rtl/core/cdb_arbiter.sv \
+	tb/core/backend_cross_fu_dependency_tb.sv
 
 
 # --------------------------------------------------------------------
@@ -153,6 +148,7 @@ $(eval $(call SIM_TEMPLATE,backend_rename,backend_rename_tb,BACKEND_RENAME))
 $(eval $(call SIM_TEMPLATE,dispatch,dispatch_tb,DISPATCH))
 $(eval $(call SIM_TEMPLATE,cdb_arbiter,cdb_arbiter_tb,CDB_ARBITER))
 $(eval $(call SIM_TEMPLATE,backend_ooo,backend_ooo_tb,BACKEND_OOO))
+$(eval $(call SIM_TEMPLATE,backend_cross_fu_dependency,backend_cross_fu_dependency_tb,BACKEND_CROSS_FU_DEPENDENCY))
 
 $(eval $(call LINT_TEMPLATE,alu,alu_tb,ALU))
 $(eval $(call LINT_TEMPLATE,regfile,regfile_tb,REGFILE))
@@ -168,6 +164,7 @@ $(eval $(call LINT_TEMPLATE,backend_rename,backend_rename_tb,BACKEND_RENAME))
 $(eval $(call LINT_TEMPLATE,dispatch,dispatch_tb,DISPATCH))
 $(eval $(call LINT_TEMPLATE,cdb_arbiter,cdb_arbiter_tb,CDB_ARBITER))
 $(eval $(call LINT_TEMPLATE,backend_ooo,backend_ooo_tb,BACKEND_OOO))
+$(eval $(call LINT_TEMPLATE,backend_cross_fu_dependency,backend_cross_fu_dependency_tb,BACKEND_CROSS_FU_DEPENDENCY))
 
 
 # --------------------------------------------------------------------
@@ -177,23 +174,26 @@ $(eval $(call LINT_TEMPLATE,backend_ooo,backend_ooo_tb,BACKEND_OOO))
 .PHONY: sim lint clean \
 	sim_alu sim_regfile sim_fu sim_fifo sim_rob sim_rs sim_cdb \
 	sim_backend_writeback sim_backend_dependency sim_rename_table \
-	sim_backend_rename sim_dispatch sim_cdb_arbiter sim_backend_ooo\
+	sim_backend_rename sim_dispatch sim_cdb_arbiter sim_backend_ooo \
+	sim_backend_cross_fu_dependency \
 	lint_alu lint_regfile lint_fu lint_fifo lint_rob lint_rs lint_cdb \
 	lint_backend_writeback lint_backend_dependency lint_rename_table\
-	lint_backend_rename lint_dispatch lint_cdb_arbiter lint_backend_ooo\
+	lint_backend_rename lint_dispatch lint_cdb_arbiter lint_backend_ooo \
+	lint_backend_cross_fu_dependency \
 	wave_alu wave_regfile wave_fu wave_fifo wave_rob wave_rs wave_cdb \
 	wave_backend_writeback wave_backend_dependency wave_rename_table wave_backend_rename \
 	wave_dispatch \
 	wave_cdb_arbiter \
 	wave_backend_ooo \
+	wave_backend_cross_fu_dependency \
 
-sim: sim_alu sim_regfile sim_fu sim_fifo sim_rob sim_rs sim_cdb sim_backend_writeback sim_backend_dependency sim_rename_table sim_backend_rename sim_dispatch sim_cdb_arbiter sim_backend_ooo
+sim: sim_alu sim_regfile sim_fu sim_fifo sim_rob sim_rs sim_cdb sim_backend_writeback sim_backend_dependency sim_rename_table sim_backend_rename sim_dispatch sim_cdb_arbiter sim_backend_ooo sim_backend_cross_fu_dependency
 	@echo
 	@echo "================================"
 	@echo "ALL TESTS PASSED"
 	@echo "================================"
 
-lint: lint_alu lint_regfile lint_fu lint_fifo lint_rob lint_rs lint_cdb lint_backend_writeback lint_backend_dependency lint_rename_table lint_backend_rename lint_dispatch lint_cdb_arbiter lint_backend_ooo
+lint: lint_alu lint_regfile lint_fu lint_fifo lint_rob lint_rs lint_cdb lint_backend_writeback lint_backend_dependency lint_rename_table lint_backend_rename lint_dispatch lint_cdb_arbiter lint_backend_ooo lint_backend_cross_fu_dependency
 	@echo
 	@echo "ALL LINT CHECKS PASSED"
 
@@ -243,6 +243,9 @@ wave_cdb_arbiter:
 
 wave_backend_ooo:
 	@gtkwave backend_ooo_tb.vcd
+
+wave_backend_cross_fu_dependency:
+	@gtkwave backend_cross_fu_dependency_tb.vcd
 # --------------------------------------------------------------------
 # Cleanup
 # --------------------------------------------------------------------
