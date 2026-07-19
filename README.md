@@ -10,7 +10,7 @@ The main architectural goal is to demonstrate:
 out-of-order execution + in-order commit
 ````
 
-The current design supports tagged dependencies, reservation-station wakeup, fixed-latency execution, CDB-style result broadcast, ROB-based writeback and commit, register renaming, and committed architectural register state.
+The current design supports tagged dependencies, register renaming, separate ALU and multiply execution paths, reservation-station wakeup, fixed-latency execution, CDB arbitration, result backpressure, ROB-based writeback and commit, and committed architectural register state.
 
 ---
 
@@ -20,29 +20,46 @@ Implemented and tested:
 
 * Combinational ALU
 * Parameterized architectural register file
-* Fixed-latency functional unit
+* Fixed-latency functional unit with result ready/valid backpressure
 * FIFO / circular queue
 * Reorder buffer
 * Reservation station
-* Common data bus
+* Single-source common data bus
+* Two-source fixed-priority CDB arbiter
 * Rename table
+* Dispatch-stage operand selection and ALU/MUL routing
+* Separate ALU and multiply reservation stations
+* Separate short- and long-latency functional units
 * RS → FU → CDB → ROB writeback integration
 * Dependency wakeup through CDB tags
+* Cross-functional-unit dependency wakeup
 * Rename-table and register-file integration
+* Out-of-order completion with in-order ROB commit
+* Simultaneous FU-result collision handling
+* FU result holding under CDB backpressure
 * ROB commit into architectural register state
 * Self-checking SystemVerilog testbenches
 * Cycle-based event logging
 * Verilator simulation and lint workflow
 * GTKWave waveform generation
 
-The current integrated backend can execute a sequence such as:
+The integrated backend can execute independent instructions such as:
 
 ```asm
-ADD R1, R2, R3
+MUL R1, R2, R3
+ADD R4, R5, R6
+```
+
+The younger ADD may complete before the older multiply, but the ROB still commits the multiply first.
+
+It also supports dependencies across execution paths:
+
+```asm
+MUL R1, R2, R3
 ADD R4, R1, R5
 ```
 
-The second instruction detects that `R1` is pending, waits on the producing ROB tag, wakes when the result is broadcast on the CDB, executes, and later commits in program order.
+The ADD waits in the ALU reservation station for the multiply result, wakes when the matching ROB tag is broadcast on the CDB, and then executes.
 
 ---
 
@@ -115,7 +132,17 @@ result value
 matching destination tag
 ```
 
-The tag travels with the operation so the result can be written back to the correct ROB entry.
+The functional unit uses a ready/valid result handshake.
+
+If the result cannot immediately use the CDB, the FU:
+
+```text
+keeps result_valid asserted
+holds the result and destination tag stable
+remains busy until result_ready is asserted
+```
+
+This prevents results from being lost when multiple functional units complete at the same time.
 
 ---
 
@@ -170,10 +197,11 @@ Instructions may complete out of order, but architectural updates occur in progr
 Example tested behavior:
 
 ```text
-Allocate ROB0, ROB1, ROB2
-Write back ROB1 before ROB0
+Allocate older MUL as ROB0
+Allocate younger ADD as ROB1
+ROB1 writes back before ROB0
 ROB1 cannot commit because ROB0 is still at the head
-Write back ROB0
+ROB0 writes back
 Commit ROB0
 Commit ROB1
 ```
@@ -225,7 +253,14 @@ The current implementation:
 * Tracks occupancy
 * Frees an entry after issue
 
-Oldest-ready scheduling and multiple functional units are future extensions.
+The integrated backend instantiates separate reservation stations for:
+
+```text
+ALU operations
+multiply operations
+```
+
+Oldest-ready scheduling and multi-issue reservation stations remain future extensions.
 
 ---
 
@@ -237,7 +272,7 @@ File:
 rtl/core/cdb.sv
 ```
 
-The current CDB is a combinational tagged broadcast path from one functional unit.
+The original CDB module is a combinational tagged broadcast path from one functional unit.
 
 It broadcasts:
 
@@ -252,7 +287,45 @@ The same broadcast is observed by:
 * The ROB for result writeback
 * Reservation stations for operand wakeup
 
-Because the current design has one FU, no arbitration is required yet. A future multi-FU implementation will add arbitration and result holding.
+This module is still used by the earlier single-FU integration tests.
+
+---
+
+### CDB Arbiter
+
+File:
+
+```text
+rtl/core/cdb_arbiter.sv
+```
+
+The CDB arbiter accepts completed results from two functional units:
+
+```text
+source 0: ALU functional unit
+source 1: multiply functional unit
+```
+
+It selects one result for the shared CDB.
+
+The current arbitration policy is fixed priority:
+
+```text
+ALU has priority over MUL
+```
+
+The arbiter also produces a separate `ready` signal for each functional unit.
+
+When both FUs complete simultaneously:
+
+```text
+ALU broadcasts first
+MUL receives backpressure
+MUL holds its result and tag
+MUL broadcasts on a later cycle
+```
+
+A dedicated integration test verifies that no result is dropped during CDB contention.
 
 ---
 
@@ -298,6 +371,48 @@ I1 writes R1 -> ROB1
 
 When ROB0 commits:
 R1 must continue pointing to ROB1
+```
+
+---
+
+### Dispatch
+
+File:
+
+```text
+rtl/core/dispatch.sv
+```
+
+The dispatch module coordinates instruction insertion into the backend.
+
+It:
+
+* Forwards source-register addresses to the register file
+* Looks up source dependencies in the rename table
+* Converts each source into either a ready value or a waiting ROB tag
+* Allocates a new ROB entry
+* Updates the destination rename mapping
+* Routes ALU operations to the ALU reservation station
+* Routes multiply operations to the multiply reservation station
+* Applies backpressure if the ROB or selected reservation station is full
+
+Dispatch is atomic:
+
+```text
+ROB allocation
+rename-table update
+reservation-station insertion
+```
+
+occur together only when all required structures are ready.
+
+Only the selected reservation station affects `dispatch_ready`.
+
+For example:
+
+```text
+a full MUL RS does not block an ADD
+a full ALU RS does not block a MUL
 ```
 
 ---
@@ -365,10 +480,11 @@ tb/core/backend_rename_tb.sv
 Integrates:
 
 ```text
+dispatch
 register file
 rename table
 ROB
-reservation station
+ALU reservation station
 functional unit
 CDB
 ```
@@ -406,16 +522,121 @@ ROB1 commits R4 = 35
 rename mappings are cleared
 ```
 
-The test also logs issue, CDB, and commit events by cycle.
+---
 
-Example:
+### Backend Out-of-Order Integration Test
+
+File:
 
 ```text
-[CYCLE 7]  ISSUE ROB0: 10 + 20
-[CYCLE 11] CDB ROB0 = 30
-[CYCLE 12] ISSUE ROB1: 30 + 5
-[CYCLE 16] CDB ROB1 = 35
+tb/core/backend_ooo_tb.sv
 ```
+
+Integrates:
+
+```text
+dispatch
+register file
+rename table
+ROB
+ALU reservation station
+MUL reservation station
+ALU functional unit
+MUL functional unit
+CDB arbiter
+```
+
+It executes:
+
+```asm
+I0: MUL R1, R2, R3
+I1: ADD R4, R5, R6
+```
+
+The multiply is older but has a longer latency.
+
+Expected behavior:
+
+```text
+MUL receives ROB0
+ADD receives ROB1
+
+MUL issues first
+ADD issues later but completes first
+
+ROB1 writes back before ROB0
+ROB1 cannot commit while ROB0 is incomplete
+
+ROB0 writes back
+ROB0 commits
+ROB1 commits
+```
+
+This proves:
+
+```text
+out-of-order completion + in-order commit
+```
+
+---
+
+### Cross-FU Dependency Test
+
+File:
+
+```text
+tb/core/backend_cross_fu_dependency_tb.sv
+```
+
+Verifies dependency wakeup between different execution paths.
+
+It executes:
+
+```asm
+I0: MUL R1, R2, R3
+I1: ADD R4, R1, R5
+```
+
+The ADD is routed to the ALU reservation station but waits for the multiply's ROB tag.
+
+Expected behavior:
+
+```text
+MUL executes in the multiply FU
+ADD remains waiting in the ALU RS
+MUL result broadcasts on the CDB
+ALU RS captures the matching result
+ADD becomes ready and issues
+both instructions commit in program order
+```
+
+---
+
+### CDB Collision and Backpressure Test
+
+File:
+
+```text
+tb/core/backend_cdb_collision_tb.sv
+```
+
+Verifies simultaneous ALU and multiply completion.
+
+The test aligns the FU latencies so both produce `result_valid` in the same cycle.
+
+Expected behavior:
+
+```text
+ALU and MUL request the CDB simultaneously
+ALU wins fixed-priority arbitration
+MUL receives result backpressure
+MUL keeps its value and tag stable
+MUL broadcasts on the following cycle
+both ROB entries receive their results
+commit remains in program order
+```
+
+This verifies that no result is lost when multiple functional units contend for the shared CDB.
 
 ---
 
@@ -433,7 +654,9 @@ sv-tomasulo/
 │       ├── rob.sv
 │       ├── reservation_station.sv
 │       ├── cdb.sv
-│       └── rename_table.sv
+│       ├── cdb_arbiter.sv
+│       ├── rename_table.sv
+│       └── dispatch.sv
 ├── tb/
 │   ├── common/
 │   │   ├── alu_tb.sv
@@ -444,10 +667,15 @@ sv-tomasulo/
 │       ├── rob_tb.sv
 │       ├── reservation_station_tb.sv
 │       ├── cdb_tb.sv
+│       ├── cdb_arbiter_tb.sv
 │       ├── rename_table_tb.sv
+│       ├── dispatch_tb.sv
 │       ├── backend_writeback_tb.sv
 │       ├── backend_dependency_tb.sv
-│       └── backend_rename_tb.sv
+│       ├── backend_rename_tb.sv
+│       ├── backend_ooo_tb.sv
+│       ├── backend_cross_fu_dependency_tb.sv
+│       └── backend_cdb_collision_tb.sv
 ├── docs/
 ├── Makefile
 ├── README.md
@@ -476,10 +704,15 @@ Run an individual test:
 make sim_rob
 make sim_rs
 make sim_cdb
+make sim_cdb_arbiter
 make sim_rename_table
+make sim_dispatch
 make sim_backend_writeback
 make sim_backend_dependency
 make sim_backend_rename
+make sim_backend_ooo
+make sim_backend_cross_fu_dependency
+make sim_backend_cdb_collision
 ```
 
 Open a waveform:
@@ -488,6 +721,9 @@ Open a waveform:
 make wave_rob
 make wave_rs
 make wave_backend_rename
+make wave_backend_ooo
+make wave_backend_cross_fu_dependency
+make wave_backend_cdb_collision
 ```
 
 Remove generated files:
@@ -544,22 +780,20 @@ State updates use nonblocking assignments. Registered state changes after the ri
 
 Near-term:
 
-1. Move register-file and rename-table operand selection into a dispatch-stage RTL module.
-2. Create a small integrated integer-backend top module.
-3. Allow commit to proceed automatically rather than being manually controlled by testbenches.
-4. Add additional dependency and WAW integration tests.
-5. Improve issue scheduling and cycle-level assertions.
+1. Create a reusable integrated backend top module instead of wiring the complete backend separately in each testbench.
+2. Allow commit to proceed automatically rather than being manually controlled by testbenches.
+3. Add additional dependency, WAW, and same-cycle interaction tests.
+4. Improve reservation-station issue scheduling and cycle-level assertions.
+5. Replace fixed-priority CDB arbitration with round-robin arbitration.
+6. Add reusable instruction and operation definitions in a shared package.
 
 Longer-term:
 
-1. Add multiple functional units and CDB arbitration.
-2. Add a load/store queue.
-3. Add conservative memory-ordering behavior.
-4. Add store-to-load forwarding.
-5. Add branch execution and recovery.
-6. Add a simple branch predictor.
-7. Add a blocking L1 data cache.
-8. Compare architectural results against the existing C++ Tomasulo simulator.
-9. Add performance counters and trace export.
-
-
+1. Add a load/store queue.
+2. Add conservative memory-ordering behavior.
+3. Add store-to-load forwarding.
+4. Add branch execution and recovery.
+5. Add a simple branch predictor.
+6. Add a blocking L1 data cache.
+7. Compare architectural results against the existing C++ Tomasulo simulator.
+8. Add performance counters and trace export.
