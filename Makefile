@@ -114,23 +114,6 @@ BACKEND_SRCS := \
 	rtl/core/backend.sv \
 	tb/core/backend_tb.sv
 
-BACKEND_BASIC_SRCS := \
-	$(filter-out tb/core/backend_tb.sv,$(BACKEND_SRCS)) \
-	tb/core/backend_basic_tb.sv
-
-BACKEND_DEPENDENCY_TOP_SRCS := \
-	$(filter-out tb/core/backend_tb.sv,$(BACKEND_SRCS)) \
-	tb/core/backend_dependency_top_tb.sv
-
-BACKEND_OOO_TOP_SRCS := \
-	$(filter-out tb/core/backend_tb.sv,$(BACKEND_SRCS)) \
-	tb/core/backend_ooo_top_tb.sv
-
-BACKEND_CROSS_FU_DEPENDENCY_TOP_SRCS := \
-	$(filter-out tb/core/backend_tb.sv,$(BACKEND_SRCS)) \
-	tb/core/backend_cross_fu_dependency_top_tb.sv
-
-
 # --------------------------------------------------------------------
 # Helper macros
 # --------------------------------------------------------------------
@@ -188,10 +171,6 @@ $(eval $(call SIM_TEMPLATE,backend_ooo,backend_ooo_tb,BACKEND_OOO))
 $(eval $(call SIM_TEMPLATE,backend_cross_fu_dependency,backend_cross_fu_dependency_tb,BACKEND_CROSS_FU_DEPENDENCY))
 $(eval $(call SIM_TEMPLATE,backend_cdb_collision,backend_cdb_collision_tb,BACKEND_CDB_COLLISION))
 $(eval $(call SIM_TEMPLATE,backend,backend_tb,BACKEND))
-$(eval $(call SIM_TEMPLATE,backend_basic,backend_basic_tb,BACKEND_BASIC))
-$(eval $(call SIM_TEMPLATE,backend_dependency_top,backend_dependency_top_tb,BACKEND_DEPENDENCY_TOP))
-$(eval $(call SIM_TEMPLATE,backend_ooo_top,backend_ooo_top_tb,BACKEND_OOO_TOP))
-$(eval $(call SIM_TEMPLATE,backend_cross_fu_dependency_top,backend_cross_fu_dependency_top_tb,BACKEND_CROSS_FU_DEPENDENCY_TOP))
 
 $(eval $(call LINT_TEMPLATE,alu,alu_tb,ALU))
 $(eval $(call LINT_TEMPLATE,regfile,regfile_tb,REGFILE))
@@ -210,10 +189,6 @@ $(eval $(call LINT_TEMPLATE,backend_ooo,backend_ooo_tb,BACKEND_OOO))
 $(eval $(call LINT_TEMPLATE,backend_cross_fu_dependency,backend_cross_fu_dependency_tb,BACKEND_CROSS_FU_DEPENDENCY))
 $(eval $(call LINT_TEMPLATE,backend_cdb_collision,backend_cdb_collision_tb,BACKEND_CDB_COLLISION))
 $(eval $(call LINT_TEMPLATE,backend,backend_tb,BACKEND))
-$(eval $(call LINT_TEMPLATE,backend_basic,backend_basic_tb,BACKEND_BASIC))
-$(eval $(call LINT_TEMPLATE,backend_dependency_top,backend_dependency_top_tb,BACKEND_DEPENDENCY_TOP))
-$(eval $(call LINT_TEMPLATE,backend_ooo_top,backend_ooo_top_tb,BACKEND_OOO_TOP))
-$(eval $(call LINT_TEMPLATE,backend_cross_fu_dependency_top,backend_cross_fu_dependency_top_tb,BACKEND_CROSS_FU_DEPENDENCY_TOP))
 
 
 # --------------------------------------------------------------------
@@ -225,14 +200,10 @@ $(eval $(call LINT_TEMPLATE,backend_cross_fu_dependency_top,backend_cross_fu_dep
 	sim_backend_writeback sim_backend_dependency sim_rename_table \
 	sim_backend_rename sim_dispatch sim_cdb_arbiter sim_backend_ooo \
 	sim_backend_cross_fu_dependency sim_backend_cdb_collision sim_backend \
-	sim_backend_basic sim_backend_dependency_top sim_backend_ooo_top \
-	sim_backend_cross_fu_dependency_top \
 	lint_alu lint_regfile lint_fu lint_fifo lint_rob lint_rs lint_cdb \
 	lint_backend_writeback lint_backend_dependency lint_rename_table\
 	lint_backend_rename lint_dispatch lint_cdb_arbiter lint_backend_ooo \
 	lint_backend_cross_fu_dependency lint_backend_cdb_collision lint_backend \
-	lint_backend_basic lint_backend_dependency_top lint_backend_ooo_top \
-	lint_backend_cross_fu_dependency_top \
 	wave_alu wave_regfile wave_fu wave_fifo wave_rob wave_rs wave_cdb \
 	wave_backend_writeback wave_backend_dependency wave_rename_table wave_backend_rename \
 	wave_dispatch \
@@ -240,19 +211,15 @@ $(eval $(call LINT_TEMPLATE,backend_cross_fu_dependency_top,backend_cross_fu_dep
 	wave_backend_ooo \
 	wave_backend_cross_fu_dependency \
 	wave_backend_cdb_collision \
-	wave_backend \
-	wave_backend_basic \
-	wave_backend_dependency_top \
-	wave_backend_ooo_top \
-	wave_backend_cross_fu_dependency_top \
+	wave_backend
 
-sim: sim_alu sim_regfile sim_fu sim_fifo sim_rob sim_rs sim_cdb sim_backend_writeback sim_backend_dependency sim_rename_table sim_backend_rename sim_dispatch sim_cdb_arbiter sim_backend_ooo sim_backend_cross_fu_dependency sim_backend_cdb_collision sim_backend sim_backend_basic sim_backend_dependency_top sim_backend_ooo_top sim_backend_cross_fu_dependency_top
+sim: sim_alu sim_regfile sim_fu sim_fifo sim_rob sim_rs sim_cdb sim_backend_writeback sim_backend_dependency sim_rename_table sim_backend_rename sim_dispatch sim_cdb_arbiter sim_backend_ooo sim_backend_cross_fu_dependency sim_backend_cdb_collision sim_backend
 	@echo
 	@echo "================================"
 	@echo "ALL TESTS PASSED"
 	@echo "================================"
 
-lint: lint_alu lint_regfile lint_fu lint_fifo lint_rob lint_rs lint_cdb lint_backend_writeback lint_backend_dependency lint_rename_table lint_backend_rename lint_dispatch lint_cdb_arbiter lint_backend_ooo lint_backend_cross_fu_dependency lint_backend_cdb_collision lint_backend lint_backend_basic lint_backend_dependency_top lint_backend_ooo_top lint_backend_cross_fu_dependency_top
+lint: lint_alu lint_regfile lint_fu lint_fifo lint_rob lint_rs lint_cdb lint_backend_writeback lint_backend_dependency lint_rename_table lint_backend_rename lint_dispatch lint_cdb_arbiter lint_backend_ooo lint_backend_cross_fu_dependency lint_backend_cdb_collision lint_backend
 	@echo
 	@echo "ALL LINT CHECKS PASSED"
 
@@ -310,19 +277,8 @@ wave_backend_cdb_collision:
 	@gtkwave backend_cdb_collision_tb.vcd
 
 wave_backend:
-	@gtkwave backend_tb.vcd
+	@gtkwave waves/backend_tb.vcd
 
-wave_backend_basic:
-	@gtkwave waves/backend_basic_tb.vcd
-
-wave_backend_dependency_top:
-	@gtkwave waves/backend_dependency_top_tb.vcd
-
-wave_backend_ooo_top:
-	@gtkwave waves/backend_ooo_top_tb.vcd
-
-wave_backend_cross_fu_dependency_top:
-	@gtkwave waves/backend_cross_fu_dependency_top_tb.vcd
 # --------------------------------------------------------------------
 # Cleanup
 # --------------------------------------------------------------------

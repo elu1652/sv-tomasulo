@@ -687,101 +687,7 @@ This verifies that no result is lost when multiple functional units contend for 
 
 ---
 
-### Reusable Backend Basic End-to-End Test
-
-File:
-
-```text
-tb/core/backend_basic_tb.sv
-```
-
-Executes:
-
-```asm
-ADD R1, R2, R3
-```
-
-through `backend.sv` and verifies:
-
-```text
-dispatch
-ROB allocation
-ALU RS issue
-ALU execution
-CDB writeback
-ROB commit
-architectural register update
-```
-
----
-
-### Reusable Backend Same-FU Dependency Test
-
-File:
-
-```text
-tb/core/backend_dependency_top_tb.sv
-```
-
-Executes:
-
-```asm
-I0: ADD R1, R2, R3
-I1: ADD R4, R1, R5
-```
-
-and verifies:
-
-```text
-rename lookup
-waiting ROB tag
-ALU RS dependency tracking
-CDB wakeup
-dependent execution
-in-order commit
-```
-
----
-
-### Reusable Backend Out-of-Order Test
-
-File:
-
-```text
-tb/core/backend_ooo_top_tb.sv
-```
-
-Executes:
-
-```asm
-I0: MUL R1, R2, R3
-I1: ADD R4, R5, R6
-```
-
-The younger ADD completes and writes back before the older multiply, while the ROB still commits the multiply first.
-
----
-
-### Reusable Backend Cross-FU Dependency Test
-
-File:
-
-```text
-tb/core/backend_cross_fu_dependency_top_tb.sv
-```
-
-Executes:
-
-```asm
-I0: MUL R1, R2, R3
-I1: ADD R4, R1, R5
-```
-
-The multiply result broadcasts through the shared CDB, wakes the dependent instruction in the ALU reservation station, and both instructions commit in program order.
-
----
-
-### Reusable Backend CDB Collision and Backpressure Test
+### Reusable Backend Six-Scenario Regression
 
 File:
 
@@ -789,17 +695,21 @@ File:
 tb/core/backend_tb.sv
 ```
 
-This is the reusable-backend collision test. It verifies:
+This reusable-backend regression runs six isolated scenarios sequentially:
 
 ```text
-ALU and MUL results becoming valid simultaneously
-fixed-priority arbitration where ALU/source 0 wins
-MUL result backpressure
-stable held MUL result and tag
-MUL broadcast on the next cycle
-no dropped results
-in-order commit despite CDB ordering
+basic ADD execution
+same-FU RAW dependency and CDB wakeup
+out-of-order ADD/MUL completion with in-order commit
+cross-FU MUL-to-ADD dependency
+CDB collision, fixed-priority arbitration, and MUL backpressure
+WAW renaming where a consumer selects the newest producer
 ```
+
+Each scenario resets the backend, initializes its architectural inputs, checks
+the exact CDB and commit events, and verifies that the backend is empty at the
+end. The regression uses a second backend instance with the collision-specific
+MUL latency so the original arbitration and debug-signal checks remain intact.
 
 ---
 
@@ -840,10 +750,6 @@ sv-tomasulo/
 │       ├── backend_ooo_tb.sv
 │       ├── backend_cross_fu_dependency_tb.sv
 │       ├── backend_cdb_collision_tb.sv
-│       ├── backend_basic_tb.sv
-│       ├── backend_dependency_top_tb.sv
-│       ├── backend_ooo_top_tb.sv
-│       ├── backend_cross_fu_dependency_top_tb.sv
 │       └── backend_tb.sv
 ├── docs/
 ├── Makefile
@@ -887,10 +793,6 @@ make sim_backend_ooo
 make sim_backend_cross_fu_dependency
 make sim_backend_cdb_collision
 make sim_backend
-make sim_backend_basic
-make sim_backend_dependency_top
-make sim_backend_ooo_top
-make sim_backend_cross_fu_dependency_top
 ```
 
 Open a waveform:
@@ -903,10 +805,6 @@ make wave_backend_ooo
 make wave_backend_cross_fu_dependency
 make wave_backend_cdb_collision
 make wave_backend
-make wave_backend_basic
-make wave_backend_dependency_top
-make wave_backend_ooo_top
-make wave_backend_cross_fu_dependency_top
 ```
 
 Remove generated files:
