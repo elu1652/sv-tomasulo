@@ -2,13 +2,13 @@
 
 This project is a staged SystemVerilog implementation of a small Tomasulo-style out-of-order execution backend.
 
-The design is being built incrementally using independently verified RTL modules before integrating them into a complete backend.
+The design is being built incrementally using independently verified RTL modules and a reusable integrated backend.
 
 The main architectural goal is to demonstrate:
 
 ```text
 out-of-order execution + in-order commit
-````
+```
 
 The current design supports tagged dependencies, register renaming, separate ALU and multiply execution paths, reservation-station wakeup, fixed-latency execution, CDB arbitration, result backpressure, ROB-based writeback and commit, and committed architectural register state.
 
@@ -28,6 +28,7 @@ Implemented and tested:
 * Two-source fixed-priority CDB arbiter
 * Rename table
 * Dispatch-stage operand selection and ALU/MUL routing
+* Reusable integrated integer backend with a decoded ready/valid dispatch interface
 * Separate ALU and multiply reservation stations
 * Separate short- and long-latency functional units
 * RS → FU → CDB → ROB writeback integration
@@ -38,6 +39,7 @@ Implemented and tested:
 * Simultaneous FU-result collision handling
 * FU result holding under CDB backpressure
 * ROB commit into architectural register state
+* Automatic one-instruction-per-cycle in-order commit
 * Self-checking SystemVerilog testbenches
 * Cycle-based event logging
 * Verilator simulation and lint workflow
@@ -417,6 +419,51 @@ a full ALU RS does not block a MUL
 
 ---
 
+### Reusable Backend
+
+File:
+
+```text
+rtl/core/backend.sv
+```
+
+The reusable backend integrates:
+
+```text
+dispatch
+architectural register file
+rename table
+reorder buffer
+ALU reservation station
+MUL reservation station
+short-latency ALU functional unit
+long-latency MUL functional unit
+fixed-priority CDB arbiter
+ROB writeback
+automatic one-instruction-per-cycle in-order commit
+register-file commit writes
+rename-table commit cleanup
+```
+
+It accepts decoded instructions through a ready/valid dispatch interface.
+
+For integration and observation, it exposes:
+
+```text
+commit events
+ROB occupancy
+ALU RS occupancy
+MUL RS occupancy
+CDB broadcasts
+selected FU result handshake debug signals
+```
+
+The register file also has a test initialization interface used by the integration testbenches.
+
+This module is a reusable integer out-of-order backend, not a full processor. It does not include a frontend, instruction fetch or decoding, a memory system, branches, or recovery.
+
+---
+
 ## Integration Tests
 
 ### Backend Writeback Test
@@ -612,7 +659,7 @@ both instructions commit in program order
 
 ---
 
-### CDB Collision and Backpressure Test
+### Manually Wired CDB Collision and Backpressure Test
 
 File:
 
@@ -640,6 +687,122 @@ This verifies that no result is lost when multiple functional units contend for 
 
 ---
 
+### Reusable Backend Basic End-to-End Test
+
+File:
+
+```text
+tb/core/backend_basic_tb.sv
+```
+
+Executes:
+
+```asm
+ADD R1, R2, R3
+```
+
+through `backend.sv` and verifies:
+
+```text
+dispatch
+ROB allocation
+ALU RS issue
+ALU execution
+CDB writeback
+ROB commit
+architectural register update
+```
+
+---
+
+### Reusable Backend Same-FU Dependency Test
+
+File:
+
+```text
+tb/core/backend_dependency_top_tb.sv
+```
+
+Executes:
+
+```asm
+I0: ADD R1, R2, R3
+I1: ADD R4, R1, R5
+```
+
+and verifies:
+
+```text
+rename lookup
+waiting ROB tag
+ALU RS dependency tracking
+CDB wakeup
+dependent execution
+in-order commit
+```
+
+---
+
+### Reusable Backend Out-of-Order Test
+
+File:
+
+```text
+tb/core/backend_ooo_top_tb.sv
+```
+
+Executes:
+
+```asm
+I0: MUL R1, R2, R3
+I1: ADD R4, R5, R6
+```
+
+The younger ADD completes and writes back before the older multiply, while the ROB still commits the multiply first.
+
+---
+
+### Reusable Backend Cross-FU Dependency Test
+
+File:
+
+```text
+tb/core/backend_cross_fu_dependency_top_tb.sv
+```
+
+Executes:
+
+```asm
+I0: MUL R1, R2, R3
+I1: ADD R4, R1, R5
+```
+
+The multiply result broadcasts through the shared CDB, wakes the dependent instruction in the ALU reservation station, and both instructions commit in program order.
+
+---
+
+### Reusable Backend CDB Collision and Backpressure Test
+
+File:
+
+```text
+tb/core/backend_tb.sv
+```
+
+This is the reusable-backend collision test. It verifies:
+
+```text
+ALU and MUL results becoming valid simultaneously
+fixed-priority arbitration where ALU/source 0 wins
+MUL result backpressure
+stable held MUL result and tag
+MUL broadcast on the next cycle
+no dropped results
+in-order commit despite CDB ordering
+```
+
+---
+
 ## Project Structure
 
 ```text
@@ -656,7 +819,8 @@ sv-tomasulo/
 │       ├── cdb.sv
 │       ├── cdb_arbiter.sv
 │       ├── rename_table.sv
-│       └── dispatch.sv
+│       ├── dispatch.sv
+│       └── backend.sv
 ├── tb/
 │   ├── common/
 │   │   ├── alu_tb.sv
@@ -675,7 +839,12 @@ sv-tomasulo/
 │       ├── backend_rename_tb.sv
 │       ├── backend_ooo_tb.sv
 │       ├── backend_cross_fu_dependency_tb.sv
-│       └── backend_cdb_collision_tb.sv
+│       ├── backend_cdb_collision_tb.sv
+│       ├── backend_basic_tb.sv
+│       ├── backend_dependency_top_tb.sv
+│       ├── backend_ooo_top_tb.sv
+│       ├── backend_cross_fu_dependency_top_tb.sv
+│       └── backend_tb.sv
 ├── docs/
 ├── Makefile
 ├── README.md
@@ -692,11 +861,15 @@ Run all simulations:
 make sim
 ```
 
+This runs both the older standalone and manually wired integration tests and the reusable-backend tests.
+
 Run all lint checks:
 
 ```bash
 make lint
 ```
+
+This lints both the older tests and the reusable-backend tests.
 
 Run an individual test:
 
@@ -713,6 +886,11 @@ make sim_backend_rename
 make sim_backend_ooo
 make sim_backend_cross_fu_dependency
 make sim_backend_cdb_collision
+make sim_backend
+make sim_backend_basic
+make sim_backend_dependency_top
+make sim_backend_ooo_top
+make sim_backend_cross_fu_dependency_top
 ```
 
 Open a waveform:
@@ -724,6 +902,11 @@ make wave_backend_rename
 make wave_backend_ooo
 make wave_backend_cross_fu_dependency
 make wave_backend_cdb_collision
+make wave_backend
+make wave_backend_basic
+make wave_backend_dependency_top
+make wave_backend_ooo_top
+make wave_backend_cross_fu_dependency_top
 ```
 
 Remove generated files:
@@ -780,12 +963,10 @@ State updates use nonblocking assignments. Registered state changes after the ri
 
 Near-term:
 
-1. Create a reusable integrated backend top module instead of wiring the complete backend separately in each testbench.
-2. Allow commit to proceed automatically rather than being manually controlled by testbenches.
-3. Add additional dependency, WAW, and same-cycle interaction tests.
-4. Improve reservation-station issue scheduling and cycle-level assertions.
-5. Replace fixed-priority CDB arbitration with round-robin arbitration.
-6. Add reusable instruction and operation definitions in a shared package.
+1. Add additional dependency, WAW, and same-cycle interaction tests.
+2. Improve reservation-station issue scheduling and cycle-level assertions.
+3. Replace fixed-priority CDB arbitration with round-robin arbitration.
+4. Add reusable instruction and operation definitions in a shared package.
 
 Longer-term:
 
