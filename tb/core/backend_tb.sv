@@ -2,6 +2,8 @@
 
 module backend_tb;
 
+    import core_pkg::*;
+
     // ============================================================
     // Configuration and operation encodings
     // ============================================================
@@ -11,7 +13,6 @@ module backend_tb;
     localparam int NUM_MUL_RS_ENTRIES = 2;
     localparam int NUM_REGS           = 8;
     localparam int XLEN                = 32;
-    localparam int OP_W                = 4;
     localparam int REG_ADDR_W          = $clog2(NUM_REGS);
     localparam int TAG_W               = $clog2(NUM_ROB_ENTRIES);
     localparam int ROB_COUNT_W         = $clog2(NUM_ROB_ENTRIES + 1);
@@ -19,9 +20,6 @@ module backend_tb;
     localparam int MUL_RS_COUNT_W      = $clog2(NUM_MUL_RS_ENTRIES + 1);
     localparam int MAX_EVENTS          = 16;
     localparam int MAX_WAIT_CYCLES     = 120;
-
-    localparam logic [OP_W-1:0] OP_ADD = 4'd0;
-    localparam logic [OP_W-1:0] OP_MUL = 4'd5;
 
     // ============================================================
     // Scenario identifiers

@@ -23,16 +23,7 @@ module fixed_latency_fu #(
     output logic [TAG_WIDTH-1:0] result_tag
 );
 
-    // ----------------------------------------------------------------
-    // Operation encodings
-    // ----------------------------------------------------------------
-
-    localparam logic [3:0] ALU_ADD = 4'd0;
-    localparam logic [3:0] ALU_SUB = 4'd1;
-    localparam logic [3:0] ALU_AND = 4'd2;
-    localparam logic [3:0] ALU_OR  = 4'd3;
-    localparam logic [3:0] ALU_XOR = 4'd4;
-    localparam logic [3:0] ALU_MUL = 4'd5;
+    import core_pkg::*;
 
     // ----------------------------------------------------------------
     // Functional-unit states
@@ -75,12 +66,12 @@ module fixed_latency_fu #(
 
     always_comb begin
         case (op_reg)
-            ALU_ADD: computed_result = a_reg + b_reg;
-            ALU_SUB: computed_result = a_reg - b_reg;
-            ALU_AND: computed_result = a_reg & b_reg;
-            ALU_OR:  computed_result = a_reg | b_reg;
-            ALU_XOR: computed_result = a_reg ^ b_reg;
-            ALU_MUL: computed_result = a_reg * b_reg;
+            OP_ADD: computed_result = a_reg + b_reg;
+            OP_SUB: computed_result = a_reg - b_reg;
+            OP_AND: computed_result = a_reg & b_reg;
+            OP_OR:  computed_result = a_reg | b_reg;
+            OP_XOR: computed_result = a_reg ^ b_reg;
+            OP_MUL: computed_result = a_reg * b_reg;
             default: computed_result = '0;
         endcase
     end

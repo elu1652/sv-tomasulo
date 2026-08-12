@@ -3,6 +3,8 @@ VERILATOR := verilator
 SIM_FLAGS  := --binary --trace --timing -Wall -Wno-fatal
 LINT_FLAGS := --lint-only --timing -Wall -Wno-fatal
 
+CORE_PKG := rtl/core/core_pkg.sv
+
 .DEFAULT_GOAL := sim
 
 # --------------------------------------------------------------------
@@ -126,6 +128,7 @@ sim_$(1):
 	@$$(VERILATOR) $$(SIM_FLAGS) \
 		--Mdir obj_dir/$(1) \
 		--top-module $(2) \
+		$$(CORE_PKG) \
 		$$($(3)_SRCS) \
 		> obj_dir/$(1)/build.log 2>&1 || { \
 			echo "[ERROR] $(1) build failed"; \
@@ -142,6 +145,7 @@ lint_$(1):
 	@mkdir -p obj_dir/$(1)
 	@$$(VERILATOR) $$(LINT_FLAGS) \
 		--top-module $(2) \
+		$$(CORE_PKG) \
 		$$($(3)_SRCS) \
 		> obj_dir/$(1)/lint.log 2>&1 || { \
 			cat obj_dir/$(1)/lint.log; \

@@ -72,7 +72,7 @@ module dispatch #(
     output logic [TAG_W-1:0]      mul_rs_dispatch_dest_tag
 );
 
-    localparam logic [OP_W-1:0] OP_MUL = OP_W'(5);
+    import core_pkg::*;
 
     logic instruction_is_mul;
     logic selected_rs_ready;
