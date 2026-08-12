@@ -687,7 +687,7 @@ This verifies that no result is lost when multiple functional units contend for 
 
 ---
 
-### Reusable Backend Six-Scenario Regression
+### Reusable Backend Eleven-Scenario Regression
 
 File:
 
@@ -695,7 +695,7 @@ File:
 tb/core/backend_tb.sv
 ```
 
-This reusable-backend regression runs six isolated scenarios sequentially:
+This reusable-backend regression runs eleven isolated scenarios sequentially:
 
 ```text
 basic ADD execution
@@ -704,6 +704,11 @@ out-of-order ADD/MUL completion with in-order commit
 cross-FU MUL-to-ADD dependency
 CDB collision, fixed-priority arbitration, and MUL backpressure
 WAW renaming where a consumer selects the newest producer
+same-cycle commit cleanup and rename allocation to one architectural register
+ROB-full dispatch backpressure with atomic retry after space becomes available
+selected reservation-station backpressure, including nonselected-FU progress
+circular ROB tag reuse across tags 0, 1, 2, 3, 0, and 1
+reset cancellation of instructions in flight and clean post-reset ROB0 reuse
 ```
 
 Each scenario resets the backend, initializes its architectural inputs, checks
@@ -861,7 +866,7 @@ State updates use nonblocking assignments. Registered state changes after the ri
 
 Near-term:
 
-1. Add additional dependency, WAW, and same-cycle interaction tests.
+1. Add randomized, reference-model-backed backend regression coverage.
 2. Improve reservation-station issue scheduling and cycle-level assertions.
 3. Replace fixed-priority CDB arbitration with round-robin arbitration.
 4. Add reusable instruction and operation definitions in a shared package.

@@ -17,8 +17,8 @@ module backend_tb;
     localparam int ROB_COUNT_W         = $clog2(NUM_ROB_ENTRIES + 1);
     localparam int ALU_RS_COUNT_W      = $clog2(NUM_ALU_RS_ENTRIES + 1);
     localparam int MUL_RS_COUNT_W      = $clog2(NUM_MUL_RS_ENTRIES + 1);
-    localparam int MAX_EVENTS          = 8;
-    localparam int MAX_WAIT_CYCLES     = 80;
+    localparam int MAX_EVENTS          = 16;
+    localparam int MAX_WAIT_CYCLES     = 120;
 
     localparam logic [OP_W-1:0] OP_ADD = 4'd0;
     localparam logic [OP_W-1:0] OP_MUL = 4'd5;
@@ -27,13 +27,18 @@ module backend_tb;
     // Scenario identifiers
     // ============================================================
 
-    localparam int SCENARIO_NONE       = 0;
-    localparam int SCENARIO_BASIC      = 1;
-    localparam int SCENARIO_SAME_FU    = 2;
-    localparam int SCENARIO_OOO        = 3;
-    localparam int SCENARIO_CROSS_FU   = 4;
-    localparam int SCENARIO_COLLISION  = 5;
-    localparam int SCENARIO_WAW        = 6;
+    localparam int SCENARIO_NONE          = 0;
+    localparam int SCENARIO_BASIC         = 1;
+    localparam int SCENARIO_SAME_FU       = 2;
+    localparam int SCENARIO_OOO           = 3;
+    localparam int SCENARIO_CROSS_FU      = 4;
+    localparam int SCENARIO_COLLISION     = 5;
+    localparam int SCENARIO_WAW           = 6;
+    localparam int SCENARIO_COMMIT_RENAME = 7;
+    localparam int SCENARIO_ROB_FULL      = 8;
+    localparam int SCENARIO_RS_BACKPRESSURE = 9;
+    localparam int SCENARIO_ROB_WRAPAROUND  = 10;
+    localparam int SCENARIO_RESET_IN_FLIGHT = 11;
 
     // ============================================================
     // Clock
@@ -133,6 +138,8 @@ module backend_tb;
     logic saw_collision;
     logic waiting_for_held_mul;
     logic saw_rob1_waw_broadcast;
+
+    logic saw_same_cycle_commit_rename;
 
     // ============================================================
     // DUT instantiations
@@ -278,6 +285,8 @@ module backend_tb;
             waiting_for_held_mul   = 1'b0;
             saw_rob1_waw_broadcast = 1'b0;
 
+            saw_same_cycle_commit_rename = 1'b0;
+
             for (i = 0; i < MAX_EVENTS; i = i + 1) begin
                 cdb_tags[i]         = '0;
                 cdb_values[i]       = '0;
@@ -403,6 +412,220 @@ module backend_tb;
                 clear_collision_inputs();
             end else begin
                 clear_main_inputs();
+            end
+        end
+    endtask
+
+    // Drives a main-DUT instruction for one known accepting edge. Unlike
+    // dispatch_instruction, consecutive calls dispatch on consecutive cycles.
+    task automatic drive_main_instruction(
+        input logic [OP_W-1:0] op,
+        input logic [REG_ADDR_W-1:0] src1_reg,
+        input logic [REG_ADDR_W-1:0] src2_reg,
+        input logic [REG_ADDR_W-1:0] dest_reg
+    );
+        logic ready_before_edge;
+
+        begin
+            @(negedge clk);
+            main_dispatch_valid    = 1'b1;
+            main_dispatch_op       = op;
+            main_dispatch_src1_reg = src1_reg;
+            main_dispatch_src2_reg = src2_reg;
+            main_dispatch_dest_reg = dest_reg;
+            #1;
+
+            ready_before_edge = main_dispatch_ready;
+            if (ready_before_edge !== 1'b1) begin
+                $fatal(1, "Expected dispatch_ready before accepting edge");
+            end
+
+            @(posedge clk);
+            #1;
+
+            if (main_dispatch_valid !== 1'b1 || ready_before_edge !== 1'b1) begin
+                $fatal(1, "Expected valid/ready dispatch handshake");
+            end
+        end
+    endtask
+
+    // Holds one instruction across an accepting-edge opportunity while ready
+    // is low, proving that no ROB or RS insertion occurs on that edge.
+    task automatic hold_instruction_and_expect_blocked(
+        input logic [OP_W-1:0] op,
+        input logic [REG_ADDR_W-1:0] src1_reg,
+        input logic [REG_ADDR_W-1:0] src2_reg,
+        input logic [REG_ADDR_W-1:0] dest_reg,
+        input logic [ROB_COUNT_W-1:0] expected_rob_count,
+        input logic [ALU_RS_COUNT_W-1:0] expected_alu_rs_count,
+        input logic [MUL_RS_COUNT_W-1:0] expected_mul_rs_count,
+        input string reason
+    );
+        int unsigned broadcasts_before;
+        int unsigned commits_before;
+
+        begin
+            @(negedge clk);
+            main_dispatch_valid    = 1'b1;
+            main_dispatch_op       = op;
+            main_dispatch_src1_reg = src1_reg;
+            main_dispatch_src2_reg = src2_reg;
+            main_dispatch_dest_reg = dest_reg;
+            #1;
+
+            if (main_dispatch_ready !== 1'b0) begin
+                $fatal(1, "%s: expected dispatch_ready low", reason);
+            end
+
+            if (
+                main_rob_count != expected_rob_count ||
+                main_alu_rs_count != expected_alu_rs_count ||
+                main_mul_rs_count != expected_mul_rs_count
+            ) begin
+                $fatal(
+                    1,
+                    "%s: wrong occupancy before blocked edge: ROB=%0d ALU_RS=%0d MUL_RS=%0d",
+                    reason,
+                    main_rob_count,
+                    main_alu_rs_count,
+                    main_mul_rs_count
+                );
+            end
+
+            broadcasts_before = broadcast_count;
+            commits_before    = commit_count;
+
+            @(posedge clk);
+            #1;
+
+            if (
+                main_rob_count != expected_rob_count ||
+                main_alu_rs_count != expected_alu_rs_count ||
+                main_mul_rs_count != expected_mul_rs_count
+            ) begin
+                $fatal(1, "%s: blocked dispatch changed occupancy", reason);
+            end
+
+            if (
+                broadcast_count != broadcasts_before ||
+                commit_count != commits_before
+            ) begin
+                $fatal(1, "%s: unexpected event during blocked interval", reason);
+            end
+
+            $display("[CYCLE %0d] %s", cycle, reason);
+
+            @(negedge clk);
+            clear_main_inputs();
+        end
+    endtask
+
+    // Dispatches an instruction on the exact rising edge that an older
+    // instruction commits. This directly tests commit cleanup versus a
+    // new rename allocation to the same architectural register.
+    task automatic dispatch_on_commit(
+        input logic [OP_W-1:0] op,
+        input logic [REG_ADDR_W-1:0] src1_reg,
+        input logic [REG_ADDR_W-1:0] src2_reg,
+        input logic [REG_ADDR_W-1:0] dest_reg,
+        input int expected_commit_tag,
+        input int expected_commit_dest,
+        input int expected_commit_value
+    );
+        logic dispatch_was_ready;
+
+        begin
+            @(negedge clk);
+
+            main_dispatch_valid    = 1'b1;
+            main_dispatch_op       = op;
+            main_dispatch_src1_reg = src1_reg;
+            main_dispatch_src2_reg = src2_reg;
+            main_dispatch_dest_reg = dest_reg;
+
+            // dispatch_ready is combinational and must already be high
+            // before the accepting rising edge.
+            dispatch_was_ready = main_dispatch_ready;
+
+            if (dispatch_was_ready !== 1'b1) begin
+                $fatal(
+                    1,
+                    "Expected dispatch_ready before simultaneous commit/rename edge"
+                );
+            end
+
+            // This is the edge on which both operations occur:
+            //
+            // 1. ROB0 commits R1.
+            // 2. The newly dispatched instruction allocates ROB1 and
+            //    installs the newer R1 -> ROB1 rename mapping.
+            @(posedge clk);
+
+            // Allow DUT nonblocking assignments and combinational outputs
+            // to settle, matching the convention used by the event monitor.
+            #1;
+
+            if (main_dispatch_valid !== 1'b1) begin
+                $fatal(
+                    1,
+                    "dispatch_valid was not held through the accepting edge"
+                );
+            end
+
+            if (main_commit_valid !== 1'b1) begin
+                $fatal(
+                    1,
+                    "Expected an older instruction to commit during dispatch"
+                );
+            end
+
+            if (
+                main_commit_tag != TAG_W'(expected_commit_tag) ||
+                main_commit_dest_reg != REG_ADDR_W'(expected_commit_dest) ||
+                main_commit_value != XLEN'(expected_commit_value)
+            ) begin
+                $fatal(
+                    1,
+                    "Wrong simultaneous commit: expected ROB%0d R%0d = %0d, got ROB%0d R%0d = %0d",
+                    expected_commit_tag,
+                    expected_commit_dest,
+                    expected_commit_value,
+                    main_commit_tag,
+                    main_commit_dest_reg,
+                    main_commit_value
+                );
+            end
+
+            saw_same_cycle_commit_rename = 1'b1;
+
+            @(negedge clk);
+            clear_main_inputs();
+        end
+    endtask
+
+    // Waits for an exact number of CDB broadcasts with a finite timeout.
+    task automatic wait_for_broadcasts(input int expected_count);
+        int unsigned wait_cycles;
+
+        begin
+            wait_cycles = 0;
+
+            while (
+                broadcast_count < expected_count &&
+                wait_cycles < MAX_WAIT_CYCLES
+            ) begin
+                @(posedge clk);
+                #2;
+                wait_cycles = wait_cycles + 1;
+            end
+
+            if (broadcast_count != expected_count) begin
+                $fatal(
+                    1,
+                    "Timed out waiting for %0d broadcasts; observed %0d",
+                    expected_count,
+                    broadcast_count
+                );
             end
         end
     endtask
@@ -814,6 +1037,394 @@ module backend_tb;
         end
     endtask
 
+    // Proves that a new rename allocation wins over commit cleanup when
+    // both update the same architectural register on one clock edge.
+    //
+    // I0 commits R1 = 30 while I1 simultaneously renames R1 to ROB1.
+    // I2 must therefore wait for ROB1 = 20 and produce 23, not use the
+    // newly committed value 30 and incorrectly produce 33.
+    task automatic test_same_cycle_commit_and_rename;
+        begin
+            print_header("Same-cycle commit and rename");
+
+            reset_dut(SCENARIO_COMMIT_RENAME);
+
+            initialize_register(1'b0, REG_ADDR_W'(2), XLEN'(10));
+            initialize_register(1'b0, REG_ADDR_W'(3), XLEN'(20));
+            initialize_register(1'b0, REG_ADDR_W'(4), XLEN'(4));
+            initialize_register(1'b0, REG_ADDR_W'(5), XLEN'(5));
+            initialize_register(1'b0, REG_ADDR_W'(7), XLEN'(3));
+
+            // I0: ADD R1, R2, R3
+            // ROB0 produces 30.
+            dispatch_instruction(
+                1'b0,
+                OP_ADD,
+                REG_ADDR_W'(2),
+                REG_ADDR_W'(3),
+                REG_ADDR_W'(1)
+            );
+
+            // Wait until ROB0 writes back. ROB0 should become eligible to
+            // commit on the following rising edge.
+            wait_for_broadcasts(1);
+            check_cdb_event(0, 0, 30);
+
+            // I1: MUL R1, R4, R5
+            //
+            // Dispatch this on the same rising edge that ROB0 commits R1.
+            // The new R1 -> ROB1 rename must take priority over clearing
+            // the old ROB0 mapping.
+            dispatch_on_commit(
+                OP_MUL,
+                REG_ADDR_W'(4),
+                REG_ADDR_W'(5),
+                REG_ADDR_W'(1),
+                0,
+                1,
+                30
+            );
+
+            // I2: ADD R6, R1, R7
+            //
+            // It must depend on I1/ROB1 and calculate 20 + 3 = 23.
+            dispatch_instruction(
+                1'b0,
+                OP_ADD,
+                REG_ADDR_W'(1),
+                REG_ADDR_W'(7),
+                REG_ADDR_W'(6)
+            );
+
+            wait_for_commits(3);
+
+            if (!saw_same_cycle_commit_rename) begin
+                $fatal(
+                    1,
+                    "Did not observe simultaneous commit and rename"
+                );
+            end
+
+            if (broadcast_count != 3) begin
+                $fatal(
+                    1,
+                    "Expected exactly 3 broadcasts, observed %0d",
+                    broadcast_count
+                );
+            end
+
+            check_cdb_event(0, 0, 30);
+            check_cdb_event(1, 1, 20);
+            check_cdb_event(2, 2, 23);
+
+            check_commit_event(0, 0, 1, 30);
+            check_commit_event(1, 1, 1, 20);
+            check_commit_event(2, 2, 6, 23);
+
+            check_backend_empty(1'b0);
+
+            $display("[PASS] Same-cycle commit and rename");
+        end
+    endtask
+
+    // Fills all four ROB entries behind a long-latency head, proves a fifth
+    // instruction cannot partially dispatch, then checks wrapped-tag reuse.
+    task automatic test_rob_full_backpressure;
+        begin
+            print_header("ROB-full dispatch backpressure");
+            reset_dut(SCENARIO_ROB_FULL);
+
+            initialize_register(1'b0, REG_ADDR_W'(2), XLEN'(2));
+            initialize_register(1'b0, REG_ADDR_W'(3), XLEN'(3));
+            initialize_register(1'b0, REG_ADDR_W'(5), XLEN'(4));
+            initialize_register(1'b0, REG_ADDR_W'(7), XLEN'(5));
+
+            // ROB0: MUL R1, R2, R3 = 6
+            // ROB1: ADD R4, R1, R5 = 10
+            // ROB2: ADD R6, R1, R7 = 11
+            // ROB3: MUL R2, R4, R5 = 40
+            drive_main_instruction(OP_MUL, REG_ADDR_W'(2), REG_ADDR_W'(3), REG_ADDR_W'(1));
+            drive_main_instruction(OP_ADD, REG_ADDR_W'(1), REG_ADDR_W'(5), REG_ADDR_W'(4));
+            drive_main_instruction(OP_ADD, REG_ADDR_W'(1), REG_ADDR_W'(7), REG_ADDR_W'(6));
+            drive_main_instruction(OP_MUL, REG_ADDR_W'(4), REG_ADDR_W'(5), REG_ADDR_W'(2));
+
+            if (main_rob_count != ROB_COUNT_W'(NUM_ROB_ENTRIES)) begin
+                $fatal(1, "Expected full ROB before fifth instruction, got %0d", main_rob_count);
+            end
+
+            hold_instruction_and_expect_blocked(
+                OP_ADD,
+                REG_ADDR_W'(3),
+                REG_ADDR_W'(5),
+                REG_ADDR_W'(7),
+                4,
+                2,
+                1,
+                "ROB full; dispatch blocked"
+            );
+
+            // Re-present the blocked instruction. It must wait for ROB0 to
+            // commit, then allocate the newly free wrapped ROB0 slot.
+            dispatch_instruction(
+                1'b0,
+                OP_ADD,
+                REG_ADDR_W'(3),
+                REG_ADDR_W'(5),
+                REG_ADDR_W'(7)
+            );
+            $display("[CYCLE %0d] Dispatch resumed", cycle);
+
+            wait_for_commits(5);
+
+            if (broadcast_count != 5) begin
+                $fatal(1, "Expected exactly 5 broadcasts, observed %0d", broadcast_count);
+            end
+
+            check_cdb_event(0, 0, 6);
+            check_cdb_event(1, 1, 10);
+            check_cdb_event(2, 0, 7);
+            check_cdb_event(3, 2, 11);
+            check_cdb_event(4, 3, 40);
+            check_commit_event(0, 0, 1, 6);
+            check_commit_event(1, 1, 4, 10);
+            check_commit_event(2, 2, 6, 11);
+            check_commit_event(3, 3, 2, 40);
+            check_commit_event(4, 0, 7, 7);
+            check_backend_empty(1'b0);
+
+            $display("[PASS] ROB-full dispatch backpressure");
+        end
+    endtask
+
+    // Proves each operation class is blocked only by its selected RS. Each
+    // subtest blocks one operation, accepts the other, and drains completely.
+    task automatic test_selected_rs_backpressure;
+        begin
+            print_header("Selected reservation-station backpressure");
+            $display("[SUBTEST] ALU RS full");
+            reset_dut(SCENARIO_RS_BACKPRESSURE);
+
+            initialize_register(1'b0, REG_ADDR_W'(2), XLEN'(2));
+            initialize_register(1'b0, REG_ADDR_W'(3), XLEN'(3));
+            initialize_register(1'b0, REG_ADDR_W'(5), XLEN'(4));
+            initialize_register(1'b0, REG_ADDR_W'(7), XLEN'(5));
+
+            drive_main_instruction(OP_MUL, REG_ADDR_W'(2), REG_ADDR_W'(3), REG_ADDR_W'(1));
+            drive_main_instruction(OP_ADD, REG_ADDR_W'(1), REG_ADDR_W'(5), REG_ADDR_W'(4));
+            drive_main_instruction(OP_ADD, REG_ADDR_W'(1), REG_ADDR_W'(7), REG_ADDR_W'(6));
+
+            hold_instruction_and_expect_blocked(
+                OP_ADD,
+                REG_ADDR_W'(2),
+                REG_ADDR_W'(3),
+                REG_ADDR_W'(7),
+                3,
+                2,
+                0,
+                "ADD blocked by full ALU RS"
+            );
+
+            drive_main_instruction(OP_MUL, REG_ADDR_W'(2), REG_ADDR_W'(2), REG_ADDR_W'(7));
+            if (main_rob_count != ROB_COUNT_W'(4)) begin
+                $fatal(1, "Nonselected MUL was not accepted with ALU RS full");
+            end
+            $display("[CYCLE %0d] ADD blocked; MUL accepted", cycle);
+            @(negedge clk);
+            clear_main_inputs();
+
+            wait_for_commits(4);
+            if (broadcast_count != 4) begin
+                $fatal(1, "ALU-RS subtest expected 4 broadcasts, got %0d", broadcast_count);
+            end
+            check_cdb_event(0, 0, 6);
+            check_cdb_event(1, 1, 10);
+            check_cdb_event(2, 2, 11);
+            check_cdb_event(3, 3, 4);
+            check_commit_event(0, 0, 1, 6);
+            check_commit_event(1, 1, 4, 10);
+            check_commit_event(2, 2, 6, 11);
+            check_commit_event(3, 3, 7, 4);
+            check_backend_empty(1'b0);
+
+            $display("\n[SUBTEST] MUL RS full");
+            reset_dut(SCENARIO_RS_BACKPRESSURE);
+
+            initialize_register(1'b0, REG_ADDR_W'(2), XLEN'(2));
+            initialize_register(1'b0, REG_ADDR_W'(3), XLEN'(3));
+            initialize_register(1'b0, REG_ADDR_W'(5), XLEN'(4));
+            initialize_register(1'b0, REG_ADDR_W'(7), XLEN'(5));
+
+            drive_main_instruction(OP_MUL, REG_ADDR_W'(2), REG_ADDR_W'(3), REG_ADDR_W'(1));
+            drive_main_instruction(OP_MUL, REG_ADDR_W'(1), REG_ADDR_W'(5), REG_ADDR_W'(4));
+            drive_main_instruction(OP_MUL, REG_ADDR_W'(1), REG_ADDR_W'(7), REG_ADDR_W'(6));
+
+            hold_instruction_and_expect_blocked(
+                OP_MUL,
+                REG_ADDR_W'(2),
+                REG_ADDR_W'(3),
+                REG_ADDR_W'(7),
+                3,
+                0,
+                2,
+                "MUL blocked by full MUL RS"
+            );
+
+            drive_main_instruction(OP_ADD, REG_ADDR_W'(3), REG_ADDR_W'(5), REG_ADDR_W'(2));
+            if (main_rob_count != ROB_COUNT_W'(4)) begin
+                $fatal(1, "Nonselected ADD was not accepted with MUL RS full");
+            end
+            $display("[CYCLE %0d] MUL blocked; ADD accepted", cycle);
+            @(negedge clk);
+            clear_main_inputs();
+
+            wait_for_commits(4);
+            if (broadcast_count != 4) begin
+                $fatal(1, "MUL-RS subtest expected 4 broadcasts, got %0d", broadcast_count);
+            end
+            check_cdb_event(0, 0, 6);
+            check_cdb_event(1, 3, 7);
+            check_cdb_event(2, 2, 30);
+            check_cdb_event(3, 1, 24);
+            check_commit_event(0, 0, 1, 6);
+            check_commit_event(1, 1, 4, 24);
+            check_commit_event(2, 2, 6, 30);
+            check_commit_event(3, 3, 2, 7);
+            check_backend_empty(1'b0);
+
+            $display("[PASS] Selected reservation-station backpressure");
+        end
+    endtask
+
+    // Runs six independent ADDs and checks circular tags, including two reused
+    // slots with new destinations and values.
+    task automatic test_rob_tag_wraparound;
+        begin
+            print_header("ROB tag wraparound");
+            reset_dut(SCENARIO_ROB_WRAPAROUND);
+
+            initialize_register(1'b0, REG_ADDR_W'(2), XLEN'(2));
+            initialize_register(1'b0, REG_ADDR_W'(3), XLEN'(3));
+            initialize_register(1'b0, REG_ADDR_W'(5), XLEN'(5));
+
+            dispatch_instruction(1'b0, OP_ADD, REG_ADDR_W'(2), REG_ADDR_W'(3), REG_ADDR_W'(1));
+            wait_for_broadcasts(1);
+            dispatch_instruction(1'b0, OP_ADD, REG_ADDR_W'(2), REG_ADDR_W'(5), REG_ADDR_W'(4));
+            wait_for_broadcasts(2);
+            dispatch_instruction(1'b0, OP_ADD, REG_ADDR_W'(3), REG_ADDR_W'(5), REG_ADDR_W'(6));
+            wait_for_broadcasts(3);
+            dispatch_instruction(1'b0, OP_ADD, REG_ADDR_W'(2), REG_ADDR_W'(2), REG_ADDR_W'(7));
+            wait_for_broadcasts(4);
+            dispatch_instruction(1'b0, OP_ADD, REG_ADDR_W'(3), REG_ADDR_W'(3), REG_ADDR_W'(1));
+            wait_for_broadcasts(5);
+            dispatch_instruction(1'b0, OP_ADD, REG_ADDR_W'(5), REG_ADDR_W'(5), REG_ADDR_W'(4));
+
+            wait_for_commits(6);
+
+            if (broadcast_count != 6) begin
+                $fatal(1, "Expected exactly 6 broadcasts, observed %0d", broadcast_count);
+            end
+
+            check_cdb_event(0, 0, 5);
+            check_cdb_event(1, 1, 7);
+            check_cdb_event(2, 2, 8);
+            check_cdb_event(3, 3, 4);
+            check_cdb_event(4, 0, 6);
+            check_cdb_event(5, 1, 10);
+
+            check_commit_event(0, 0, 1, 5);
+            check_commit_event(1, 1, 4, 7);
+            check_commit_event(2, 2, 6, 8);
+            check_commit_event(3, 3, 7, 4);
+            check_commit_event(4, 0, 1, 6);
+            check_commit_event(5, 1, 4, 10);
+            check_backend_empty(1'b0);
+
+            $display("[PASS] ROB tag wraparound");
+        end
+    endtask
+
+    // Resets a running MUL and dependent ADD, observes an empty idle window,
+    // then proves clean ROB0 allocation and execution after reset.
+    task automatic test_reset_with_instructions_in_flight;
+        int unsigned idle_broadcasts;
+        int unsigned idle_commits;
+
+        begin
+            print_header("Reset with instructions in flight");
+            reset_dut(SCENARIO_RESET_IN_FLIGHT);
+
+            initialize_register(1'b0, REG_ADDR_W'(2), XLEN'(4));
+            initialize_register(1'b0, REG_ADDR_W'(3), XLEN'(5));
+            initialize_register(1'b0, REG_ADDR_W'(5), XLEN'(7));
+
+            drive_main_instruction(OP_MUL, REG_ADDR_W'(2), REG_ADDR_W'(3), REG_ADDR_W'(1));
+            drive_main_instruction(OP_ADD, REG_ADDR_W'(1), REG_ADDR_W'(5), REG_ADDR_W'(4));
+
+            @(negedge clk);
+            clear_main_inputs();
+            main_rst_n = 1'b0;
+            clear_status();
+            scenario_id = SCENARIO_RESET_IN_FLIGHT;
+            $display("[CYCLE %0d] Reset asserted with work in flight", cycle);
+
+            repeat (2) begin
+                @(posedge clk);
+                #1;
+                if (
+                    main_rob_count != '0 ||
+                    main_alu_rs_count != '0 ||
+                    main_mul_rs_count != '0 ||
+                    main_cdb_valid !== 1'b0 ||
+                    main_commit_valid !== 1'b0
+                ) begin
+                    $fatal(1, "Reset did not clear backend state and outputs");
+                end
+            end
+
+            @(negedge clk);
+            main_rst_n = 1'b1;
+            idle_broadcasts = broadcast_count;
+            idle_commits    = commit_count;
+
+            repeat (6) begin
+                @(posedge clk);
+                #1;
+                if (
+                    main_rob_count != '0 ||
+                    main_alu_rs_count != '0 ||
+                    main_mul_rs_count != '0 ||
+                    main_cdb_valid !== 1'b0 ||
+                    main_commit_valid !== 1'b0 ||
+                    broadcast_count != idle_broadcasts ||
+                    commit_count != idle_commits
+                ) begin
+                    $fatal(1, "Observed stale pre-reset work after reset release");
+                end
+            end
+            $display("[CYCLE %0d] Post-reset backend empty", cycle);
+
+            initialize_register(1'b0, REG_ADDR_W'(2), XLEN'(11));
+            initialize_register(1'b0, REG_ADDR_W'(3), XLEN'(12));
+            dispatch_instruction(
+                1'b0,
+                OP_ADD,
+                REG_ADDR_W'(2),
+                REG_ADDR_W'(3),
+                REG_ADDR_W'(6)
+            );
+
+            wait_for_commits(1);
+            if (broadcast_count != 1) begin
+                $fatal(1, "Expected one post-reset broadcast, got %0d", broadcast_count);
+            end
+            check_cdb_event(0, 0, 23);
+            check_commit_event(0, 0, 6, 23);
+            check_backend_empty(1'b0);
+
+            $display("[PASS] Reset with instructions in flight");
+        end
+    endtask
+
     // ============================================================
     // Event monitors
     // ============================================================
@@ -879,6 +1490,26 @@ module backend_tb;
                         if (!saw_rob1_waw_broadcast) begin
                             $fatal(1, "ROB2 completed before newer producer ROB1 broadcast");
                         end
+                    end
+                end
+
+                if (
+                    scenario_id == SCENARIO_COMMIT_RENAME &&
+                    main_cdb_tag == TAG_W'(2)
+                ) begin
+                    if (main_cdb_value == XLEN'(33)) begin
+                        $fatal(
+                            1,
+                            "ROB2 used committed R1=30 instead of newer ROB1 producer"
+                        );
+                    end
+
+                    if (main_cdb_value != XLEN'(23)) begin
+                        $fatal(
+                            1,
+                            "ROB2 expected 23, got %0d",
+                            main_cdb_value
+                        );
                     end
                 end
             end
@@ -1024,12 +1655,17 @@ module backend_tb;
         test_cross_fu_dependency();
         test_cdb_collision();
         test_waw_newest_producer();
+        test_same_cycle_commit_and_rename();
+        test_rob_full_backpressure();
+        test_selected_rs_backpressure();
+        test_rob_tag_wraparound();
+        test_reset_with_instructions_in_flight();
 
         scenario_id     = SCENARIO_NONE;
         main_rst_n      = 1'b0;
         collision_rst_n = 1'b0;
 
-        $display("backend_tb PASSED: 6 scenarios");
+        $display("backend_tb PASSED: 11 scenarios");
         $finish;
     end
 
@@ -1038,7 +1674,7 @@ module backend_tb;
     // ============================================================
 
     initial begin
-        repeat (600) @(posedge clk);
+        repeat (1200) @(posedge clk);
         $fatal(1, "backend_tb timed out");
     end
 
