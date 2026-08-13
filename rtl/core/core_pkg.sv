@@ -10,7 +10,9 @@ package core_pkg;
         OP_AND = 4'd2,
         OP_OR  = 4'd3,
         OP_XOR = 4'd4,
-        OP_MUL = 4'd5
+        OP_MUL = 4'd5,
+        OP_LD  = 4'd6,
+        OP_ST  = 4'd7
     } opcode_t;
 
 endpackage

@@ -116,6 +116,10 @@ BACKEND_SRCS := \
 	rtl/core/backend.sv \
 	tb/core/backend_tb.sv
 
+LSQ_SRCS := \
+	rtl/core/lsq.sv \
+	tb/core/lsq_tb.sv
+
 # --------------------------------------------------------------------
 # Helper macros
 # --------------------------------------------------------------------
@@ -175,6 +179,7 @@ $(eval $(call SIM_TEMPLATE,backend_ooo,backend_ooo_tb,BACKEND_OOO))
 $(eval $(call SIM_TEMPLATE,backend_cross_fu_dependency,backend_cross_fu_dependency_tb,BACKEND_CROSS_FU_DEPENDENCY))
 $(eval $(call SIM_TEMPLATE,backend_cdb_collision,backend_cdb_collision_tb,BACKEND_CDB_COLLISION))
 $(eval $(call SIM_TEMPLATE,backend,backend_tb,BACKEND))
+$(eval $(call SIM_TEMPLATE,lsq,lsq_tb,LSQ))
 
 $(eval $(call LINT_TEMPLATE,alu,alu_tb,ALU))
 $(eval $(call LINT_TEMPLATE,regfile,regfile_tb,REGFILE))
@@ -193,6 +198,7 @@ $(eval $(call LINT_TEMPLATE,backend_ooo,backend_ooo_tb,BACKEND_OOO))
 $(eval $(call LINT_TEMPLATE,backend_cross_fu_dependency,backend_cross_fu_dependency_tb,BACKEND_CROSS_FU_DEPENDENCY))
 $(eval $(call LINT_TEMPLATE,backend_cdb_collision,backend_cdb_collision_tb,BACKEND_CDB_COLLISION))
 $(eval $(call LINT_TEMPLATE,backend,backend_tb,BACKEND))
+$(eval $(call LINT_TEMPLATE,lsq,lsq_tb,LSQ))
 
 
 # --------------------------------------------------------------------
